@@ -465,7 +465,6 @@ ${treeOverview}`;
                     description: 'Brief explanation of why these nodes are relevant to the current scene.',
                 },
             },
-            required: [],
         }
         : {
             $schema: 'http://json-schema.org/draft-04/schema#',
