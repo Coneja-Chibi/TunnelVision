@@ -1073,6 +1073,7 @@
 }
 
 .tv-float-panel-header {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1109,6 +1110,44 @@
 .tv-float-panel-btn:hover {
     color: var(--SmartThemeBodyColor, #ccc);
     background: rgba(255, 255, 255, 0.08);
+}
+
+/* Book Picker (dropdown from tree editor button) */
+.tv-book-picker {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10001;
+    background: var(--SmartThemeBlurTintColor, #1a1a2e);
+    border: 1px solid rgba(240, 148, 108, 0.3);
+    border-radius: 8px;
+    padding: 6px;
+    min-width: 180px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.tv-book-picker-label {
+    font-size: 11px;
+    opacity: 0.6;
+    padding: 2px 6px 4px;
+}
+
+.tv-book-picker-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--SmartThemeBodyColor, #ddd);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.tv-book-picker-btn:hover {
+    background: rgba(240, 148, 108, 0.15);
 }
 
 /* Tabs */

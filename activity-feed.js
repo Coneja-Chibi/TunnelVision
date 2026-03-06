@@ -7,7 +7,8 @@
 import { eventSource, event_types } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 import { ALL_TOOL_NAMES, getActiveTunnelVisionBooks } from './tool-registry.js';
-import { getSettings, isLorebookEnabled } from './tree-store.js';
+import { getSettings, isLorebookEnabled, getTree } from './tree-store.js';
+import { openTreeEditorForBook } from './ui-controller.js';
 
 const MAX_FEED_ITEMS = 50;
 const STORAGE_KEY_POS = 'tv-feed-trigger-position';
@@ -136,17 +137,53 @@ function icon(iconClass) {
 // ── Tree editor shortcut ──
 
 /**
- * Open the tree editor popup for the first active TunnelVision lorebook.
- * If no lorebook is active or no tree is built, falls back to clicking
- * the tree editor button in settings (which shows a toast).
+ * Open the tree editor for an active TV lorebook.
+ * Single book → opens directly. Multiple → shows a quick picker dropdown.
  */
-function openTreeEditor() {
-    // Trigger the existing tree editor button — it handles lorebook
-    // selection, validation, and the full popup lifecycle.
-    const btn = document.getElementById('tv_open_tree_editor');
-    if (btn) {
-        btn.click();
+function openTreeEditorFromFeed() {
+    const books = getActiveTunnelVisionBooks().filter(b => {
+        const tree = getTree(b);
+        return tree && tree.root;
+    });
+
+    if (books.length === 0) {
+        toastr.info('No lorebooks with built trees. Build a tree first in TunnelVision settings.', 'TunnelVision');
         return;
+    }
+
+    if (books.length === 1) {
+        openTreeEditorForBook(books[0]);
+        return;
+    }
+
+    // Multiple books — show a quick picker
+    const picker = el('div', 'tv-book-picker');
+    const label = el('div', 'tv-book-picker-label');
+    label.textContent = 'Choose lorebook:';
+    picker.appendChild(label);
+
+    for (const name of books) {
+        const btn = el('button', 'tv-book-picker-btn');
+        btn.textContent = name;
+        btn.addEventListener('click', () => {
+            picker.remove();
+            openTreeEditorForBook(name);
+        });
+        picker.appendChild(btn);
+    }
+
+    // Position near the settings button in the panel header
+    const panelHeader = panelEl?.querySelector('.tv-float-panel-header');
+    if (panelHeader) {
+        panelHeader.appendChild(picker);
+        // Auto-dismiss on outside click
+        const dismiss = (e) => {
+            if (!picker.contains(e.target)) {
+                picker.remove();
+                document.removeEventListener('click', dismiss, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', dismiss, true), 0);
     }
 }
 
@@ -228,7 +265,7 @@ function createPanel() {
     const settingsBtn = el('button', 'tv-float-panel-btn');
     settingsBtn.title = 'Open tree editor';
     settingsBtn.appendChild(icon('fa-folder-tree'));
-    settingsBtn.addEventListener('click', openTreeEditor);
+    settingsBtn.addEventListener('click', openTreeEditorFromFeed);
     header.appendChild(settingsBtn);
 
     const clearBtn = el('button', 'tv-float-panel-btn');

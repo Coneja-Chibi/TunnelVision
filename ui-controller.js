@@ -636,6 +636,16 @@ function populateConnectionProfiles() {
 
 // ─── Tree Management ─────────────────────────────────────────────
 
+/**
+ * Open the tree editor for a specific lorebook. Exported for use by the activity feed.
+ * Sets currentLorebook so internal state stays consistent.
+ * @param {string} bookName
+ */
+export async function openTreeEditorForBook(bookName) {
+    currentLorebook = bookName;
+    await onOpenTreeEditor();
+}
+
 async function onOpenTreeEditor() {
     if (!currentLorebook) return;
     const tree = getTree(currentLorebook);
