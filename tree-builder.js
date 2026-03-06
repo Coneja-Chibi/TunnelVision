@@ -12,6 +12,7 @@
 import { generateRaw } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 import { loadWorldInfo } from '../../../world-info.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { createEntry, findEntryByUid } from './entry-manager.js';
 import {
     createEmptyTree,
@@ -23,6 +24,41 @@ import {
 } from './tree-store.js';
 
 const MAX_ENTRIES_PER_NODE = 10;
+
+/**
+ * Switch to the configured TV connection profile (if any), run the callback,
+ * then restore the original profile. Falls back gracefully if Connection Manager
+ * isn't installed or the /profile command isn't available.
+ * @param {() => Promise<T>} fn Async function to run with the profile active
+ * @returns {Promise<T>}
+ * @template T
+ */
+async function withConnectionProfile(fn) {
+    const settings = getSettings();
+    const targetProfile = settings.connectionProfile;
+    if (!targetProfile) return fn();
+
+    const profileCmd = SlashCommandParser?.commands?.['profile'];
+    if (!profileCmd) {
+        console.warn('[TunnelVision] /profile command not available (Connection Manager not loaded). Using current API.');
+        return fn();
+    }
+
+    // Capture the current profile name to restore later
+    const originalProfile = await profileCmd.callback({}, '');
+
+    // Skip switching if already on the target profile
+    if (originalProfile === targetProfile) return fn();
+
+    try {
+        console.log(`[TunnelVision] Switching to connection profile: "${targetProfile}"`);
+        await profileCmd.callback({ await: 'true', timeout: '3000' }, targetProfile);
+        return await fn();
+    } finally {
+        console.log(`[TunnelVision] Restoring connection profile: "${originalProfile}"`);
+        await profileCmd.callback({ await: 'true', timeout: '3000' }, originalProfile || '<None>');
+    }
+}
 
 /**
  * Format a single lorebook entry for LLM prompts, respecting the detail level setting.
@@ -136,6 +172,10 @@ export async function buildTreeFromMetadata(lorebookName, options = {}) {
  * @returns {Promise<import('./tree-store.js').TreeIndex>}
  */
 export async function buildTreeWithLLM(lorebookName, options = {}) {
+    return withConnectionProfile(() => _buildTreeWithLLM(lorebookName, options));
+}
+
+async function _buildTreeWithLLM(lorebookName, options = {}) {
     const progress = options.onProgress || (() => {});
     const detail_ = options.onDetail || (() => {});
     const bookData = await loadWorldInfo(lorebookName);
@@ -220,7 +260,7 @@ export async function buildTreeWithLLM(lorebookName, options = {}) {
     currentStep++;
     progress('Generating summaries…', 80);
     detail_('LLM writing descriptions for each category');
-    await generateSummariesForTree(tree.root, lorebookName);
+    await _generateSummariesForTree(tree.root, lorebookName);
 
     saveTree(lorebookName, tree);
     return tree;
@@ -399,6 +439,13 @@ function mergeLLMResponse(tree, response, validUids) {
  * step to reason about relevance without reading full entry content.
  */
 export async function generateSummariesForTree(node, lorebookName, _isRoot = true) {
+    if (_isRoot) {
+        return withConnectionProfile(() => _generateSummariesForTree(node, lorebookName, true));
+    }
+    return _generateSummariesForTree(node, lorebookName, _isRoot);
+}
+
+async function _generateSummariesForTree(node, lorebookName, _isRoot = true) {
     const bookData = await loadWorldInfo(lorebookName);
     if (!bookData || !bookData.entries) return;
 
@@ -432,7 +479,7 @@ export async function generateSummariesForTree(node, lorebookName, _isRoot = tru
     }
 
     for (const child of node.children) {
-        await generateSummariesForTree(child, lorebookName, false);
+        await _generateSummariesForTree(child, lorebookName, false);
     }
 }
 
@@ -573,7 +620,11 @@ async function parseLLMTreeResponse(lorebookName, response, entryUids) {
  * @param {function} [options.detail] - Detail callback (text)
  * @returns {Promise<{created: number, errors: number}>}
  */
-export async function ingestChatMessages(lorebookName, { from, to, progress, detail }) {
+export async function ingestChatMessages(lorebookName, options) {
+    return withConnectionProfile(() => _ingestChatMessages(lorebookName, options));
+}
+
+async function _ingestChatMessages(lorebookName, { from, to, progress, detail }) {
     const context = getContext();
     if (!context.chat || context.chat.length === 0) {
         throw new Error('No chat is open. Open a chat before ingesting messages.');

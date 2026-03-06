@@ -701,16 +701,20 @@ function checkMultiBookMode() {
     return warn(`Invalid multi-book mode "${oldValue}". Auto-reset to "unified".`);
 }
 
-/** Check connection profile reference is valid. */
+/** Check connection profile reference is valid and Connection Manager is available. */
 function checkConnectionProfile() {
     const settings = getSettings();
     if (!settings.connectionProfile) {
         return pass('Connection profile: using current API settings');
     }
-    // Try to verify the profile exists
+
+    // Try to verify the profile exists via Connection Manager settings
     try {
         const cmSettings = extension_settings?.connectionManager;
-        if (cmSettings?.profiles && Array.isArray(cmSettings.profiles)) {
+        if (!cmSettings) {
+            return warn(`Connection profile "${settings.connectionProfile}" is set but Connection Manager extension is not loaded. Profile switching will fall back to current API.`);
+        }
+        if (cmSettings.profiles && Array.isArray(cmSettings.profiles)) {
             const exists = cmSettings.profiles.some(p => p.name === settings.connectionProfile);
             if (exists) {
                 return pass(`Connection profile: "${settings.connectionProfile}"`);
