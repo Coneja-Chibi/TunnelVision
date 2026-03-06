@@ -17,6 +17,7 @@ import {
     getSettings,
     saveTree,
 } from './tree-store.js';
+import { getContext } from '../../../st-context.js';
 import { getActiveTunnelVisionBooks, ALL_TOOL_NAMES } from './tool-registry.js';
 
 
@@ -58,6 +59,7 @@ export async function runDiagnostics() {
     results.push(...checkMultiDocConsistency());
     results.push(checkPopupAvailability());
     results.push(...checkActivityFeedEvent());
+    results.push(checkFeedPersistence());
     results.push(checkGenerateRawAvailability());
     results.push(checkWiSuppressionEvent());
     results.push(checkChatIngestRequirements());
@@ -817,6 +819,23 @@ function checkTurnSummaryEvent() {
         return warn('MESSAGE_RECEIVED event not available. Post-turn tool call console summary will not print.');
     }
     return pass('Turn summary: MESSAGE_RECEIVED event available');
+}
+
+/** Check that the activity feed can persist to chat metadata. */
+function checkFeedPersistence() {
+    try {
+        const context = getContext();
+        if (!context.chatMetadata) {
+            return warn('No chat metadata available. Activity feed will not persist across refreshes (no active chat).');
+        }
+        const data = context.chatMetadata.tunnelvision_feed;
+        if (data && Array.isArray(data.items)) {
+            return pass(`Activity feed persistence: ${data.items.length} items saved in chat metadata.`);
+        }
+        return pass('Activity feed persistence: ready (no items yet).');
+    } catch {
+        return warn('Could not access chat metadata. Activity feed will not persist across refreshes.');
+    }
 }
 
 /** Remove UIDs from tree that aren't in the valid set. */

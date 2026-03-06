@@ -5,12 +5,13 @@
  */
 
 import { eventSource, event_types } from '../../../../script.js';
+import { getContext } from '../../../st-context.js';
 import { ALL_TOOL_NAMES, getActiveTunnelVisionBooks } from './tool-registry.js';
 import { getSettings, isLorebookEnabled } from './tree-store.js';
 
 const MAX_FEED_ITEMS = 50;
 const STORAGE_KEY_POS = 'tv-feed-trigger-position';
-const STORAGE_KEY_FEED = 'tv-feed-items';
+const METADATA_KEY = 'tunnelvision_feed';
 
 // Turn-level tool call accumulator for console summary
 /** @type {Array<{name: string, verb: string, summary: string}>} */
@@ -62,6 +63,14 @@ export function initActivityFeed() {
         eventSource.on(event_types.TOOL_CALLS_PERFORMED, onToolCallsPerformed);
     }
 
+    // Reload feed from chat metadata on chat switch
+    if (event_types.CHAT_CHANGED) {
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            loadFeed();
+            if (panelEl?.classList.contains('open')) renderAllItems();
+        });
+    }
+
     // Turn-level console summary: reset on generation start, print on message received
     if (event_types.GENERATION_STARTED) {
         eventSource.on(event_types.GENERATION_STARTED, () => { turnToolCalls = []; });
@@ -71,24 +80,32 @@ export function initActivityFeed() {
     }
 }
 
-// ── Persistence ──
+// ── Persistence (chat metadata) ──
 
 function saveFeed() {
     try {
-        sessionStorage.setItem(STORAGE_KEY_FEED, JSON.stringify({ items: feedItems, nextId }));
-    } catch { /* quota exceeded or unavailable */ }
+        const context = getContext();
+        if (!context.chatMetadata) return;
+        context.chatMetadata[METADATA_KEY] = { items: feedItems, nextId };
+        context.saveMetadataDebounced();
+    } catch { /* no active chat */ }
 }
 
 function loadFeed() {
     try {
-        const raw = sessionStorage.getItem(STORAGE_KEY_FEED);
-        if (!raw) return;
-        const data = JSON.parse(raw);
-        if (Array.isArray(data.items)) {
-            feedItems = data.items;
-            nextId = typeof data.nextId === 'number' ? data.nextId : feedItems.length;
+        const context = getContext();
+        const data = context.chatMetadata?.[METADATA_KEY];
+        if (!data || !Array.isArray(data.items)) {
+            feedItems = [];
+            nextId = 0;
+            return;
         }
-    } catch { /* corrupted or unavailable */ }
+        feedItems = data.items;
+        nextId = typeof data.nextId === 'number' ? data.nextId : feedItems.length;
+    } catch {
+        feedItems = [];
+        nextId = 0;
+    }
 }
 
 // ── DOM Helpers ──
