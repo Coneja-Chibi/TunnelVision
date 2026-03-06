@@ -21,6 +21,8 @@ import {
     removeEntryFromTree,
     getAllEntryUids,
     getSettings,
+    getBookDescription,
+    setBookDescription,
 } from './tree-store.js';
 import { buildTreeFromMetadata, buildTreeWithLLM, generateSummariesForTree, ingestChatMessages } from './tree-builder.js';
 import { registerTools, unregisterTools } from './tool-registry.js';
@@ -43,6 +45,7 @@ export function bindUIEvents() {
     $('#tv_global_enabled').on('change', onGlobalToggle);
     $('#tv_lorebook_select').on('change', onLorebookSelect);
     $('#tv_lorebook_enabled').on('change', onLorebookToggle);
+    $('#tv_book_description').on('input', onBookDescriptionChange);
     $('#tv_build_metadata').on('click', onBuildFromMetadata);
     $('#tv_build_llm').on('click', onBuildWithLLM);
     $('#tv_open_tree_editor').on('click', onOpenTreeEditor);
@@ -274,6 +277,7 @@ function onLorebookSelect() {
 
 async function loadLorebookUI(bookName) {
     $('#tv_lorebook_enabled').prop('checked', isLorebookEnabled(bookName));
+    $('#tv_book_description').val(getBookDescription(bookName) || '');
     const tree = getTree(bookName);
     updateTreeStatus(bookName, tree);
     await renderTreeEditor(bookName, tree);
@@ -305,6 +309,13 @@ function onLorebookToggle() {
     setLorebookEnabled(currentLorebook, $(this).prop('checked'));
     registerTools();
     populateLorebookDropdown(); // refresh badges
+}
+
+function onBookDescriptionChange() {
+    if (!currentLorebook) return;
+    const desc = $(this).val().trim();
+    setBookDescription(currentLorebook, desc);
+    saveSettingsDebounced();
 }
 
 function onToolToggle() {

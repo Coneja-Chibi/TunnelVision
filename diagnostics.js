@@ -16,6 +16,7 @@ import {
     findNodeById,
     getSettings,
     saveTree,
+    getBookDescription,
 } from './tree-store.js';
 import { getContext } from '../../../st-context.js';
 import { getActiveTunnelVisionBooks, ALL_TOOL_NAMES } from './tool-registry.js';
@@ -73,6 +74,7 @@ export async function runDiagnostics() {
     results.push(checkNotebookConfig());
     results.push(checkStealthMode());
     results.push(checkAutoHideSummarized());
+    results.push(...checkBookDescriptions());
     results.push(checkTurnSummaryEvent());
 
     return results;
@@ -836,6 +838,41 @@ function checkFeedPersistence() {
     } catch {
         return warn('Could not access chat metadata. Activity feed will not persist across refreshes.');
     }
+}
+
+/** Check that active lorebooks have descriptions for multi-book disambiguation. */
+function checkBookDescriptions() {
+    const results = [];
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length <= 1) {
+        // Single book doesn't need a description for disambiguation
+        return results;
+    }
+
+    let missing = 0;
+    for (const bookName of activeBooks) {
+        const userDesc = getBookDescription(bookName);
+        const tree = getTree(bookName);
+        const hasTreeSummary = tree?.root?.summary && tree.root.summary !== `Top-level index for ${bookName}`;
+
+        if (userDesc) {
+            // User-set description — best
+            continue;
+        } else if (hasTreeSummary) {
+            // LLM-generated tree summary — acceptable
+            continue;
+        } else {
+            missing++;
+        }
+    }
+
+    if (missing > 0) {
+        results.push(warn(`${missing} of ${activeBooks.length} active lorebooks have no description. Without descriptions, the AI may write entries to the wrong lorebook. Set descriptions in each lorebook's settings, or rebuild trees with LLM to auto-generate them.`));
+    } else {
+        results.push(pass(`All ${activeBooks.length} active lorebooks have descriptions for multi-book disambiguation`));
+    }
+
+    return results;
 }
 
 /** Remove UIDs from tree that aren't in the valid set. */

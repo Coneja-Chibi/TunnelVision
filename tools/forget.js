@@ -9,7 +9,7 @@
 
 import { getSettings } from '../tree-store.js';
 import { forgetEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks } from '../tool-registry.js';
+import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_Forget';
 
@@ -18,10 +18,7 @@ export const TOOL_NAME = 'TunnelVision_Forget';
  * @returns {Object}
  */
 export function getDefinition() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    const bookList = activeBooks.length > 0
-        ? activeBooks.join(', ')
-        : '(none active)';
+    const bookDesc = getBookListWithDescriptions();
 
     return {
         name: TOOL_NAME,
@@ -30,14 +27,15 @@ export function getDefinition() {
 
 By default, entries are disabled (soft-deleted) and can be re-enabled by the user. Use permanent=true only when the information is definitively wrong or harmful.
 
-Active lorebooks: ${bookList}`,
+Available lorebooks:
+${bookDesc}`,
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
             properties: {
                 lorebook: {
                     type: 'string',
-                    description: `Which lorebook the entry belongs to. Available: ${bookList}`,
+                    description: `Which lorebook the entry belongs to:\n${bookDesc}`,
                 },
                 uid: {
                     type: 'number',
@@ -55,18 +53,16 @@ Active lorebooks: ${bookList}`,
             required: ['lorebook', 'uid', 'reason'],
         },
         action: async (args) => {
-            if (!args?.lorebook || args?.uid === undefined || args?.uid === null || !args?.reason) {
-                return 'Missing required fields: lorebook, uid, and reason are all required.';
+            if (args?.uid === undefined || args?.uid === null || !args?.reason) {
+                return 'Missing required fields: uid and reason are required.';
             }
 
-            const currentBooks = getActiveTunnelVisionBooks();
-            if (!currentBooks.includes(args.lorebook)) {
-                return `Lorebook "${args.lorebook}" is not active. Available: ${currentBooks.join(', ')}`;
-            }
+            const { book: lorebook, error } = resolveTargetBook(args.lorebook);
+            if (error) return error;
 
             try {
                 const result = await forgetEntry(
-                    args.lorebook,
+                    lorebook,
                     Number(args.uid),
                     args.permanent === true,
                 );

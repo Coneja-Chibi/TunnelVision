@@ -7,7 +7,7 @@
 
 import { getSettings } from '../tree-store.js';
 import { updateEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks } from '../tool-registry.js';
+import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_Update';
 
@@ -16,10 +16,7 @@ export const TOOL_NAME = 'TunnelVision_Update';
  * @returns {Object}
  */
 export function getDefinition() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    const bookList = activeBooks.length > 0
-        ? activeBooks.join(', ')
-        : '(none active)';
+    const bookDesc = getBookListWithDescriptions();
 
     return {
         name: TOOL_NAME,
@@ -30,14 +27,15 @@ This is especially important for TRACKER entries — structured entries that tra
 
 You must know the entry's UID (obtained from a previous TunnelVision_Search retrieve action) and which lorebook it belongs to.
 
-Active lorebooks: ${bookList}`,
+Available lorebooks:
+${bookDesc}`,
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
             properties: {
                 lorebook: {
                     type: 'string',
-                    description: `Which lorebook the entry belongs to. Available: ${bookList}`,
+                    description: `Which lorebook the entry belongs to. Choose based on where the entry lives:\n${bookDesc}`,
                 },
                 uid: {
                     type: 'number',
@@ -60,14 +58,12 @@ Active lorebooks: ${bookList}`,
             required: ['lorebook', 'uid'],
         },
         action: async (args) => {
-            if (!args?.lorebook || args?.uid === undefined || args?.uid === null) {
-                return 'Missing required fields: lorebook and uid are required.';
+            if (args?.uid === undefined || args?.uid === null) {
+                return 'Missing required field: uid is required.';
             }
 
-            const currentBooks = getActiveTunnelVisionBooks();
-            if (!currentBooks.includes(args.lorebook)) {
-                return `Lorebook "${args.lorebook}" is not active. Available: ${currentBooks.join(', ')}`;
-            }
+            const { book: lorebook, error } = resolveTargetBook(args.lorebook);
+            if (error) return error;
 
             // Must provide at least one thing to update
             if (!args.content && !args.title && !args.keys) {
@@ -80,7 +76,7 @@ Active lorebooks: ${bookList}`,
                 if (args.title) updates.comment = args.title;
                 if (args.keys) updates.keys = args.keys;
 
-                const result = await updateEntry(args.lorebook, Number(args.uid), updates);
+                const result = await updateEntry(lorebook, Number(args.uid), updates);
                 return `Updated entry "${result.comment}" (UID ${result.uid}): changed ${result.updated.join(', ')}.`;
             } catch (e) {
                 console.error('[TunnelVision] Update failed:', e);

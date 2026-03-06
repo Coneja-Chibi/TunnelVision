@@ -494,6 +494,41 @@ async function _generateSummariesForTree(node, lorebookName, _isRoot = true) {
     for (const child of node.children) {
         await _generateSummariesForTree(child, lorebookName, false);
     }
+
+    // After all children are summarized, generate a book-level summary for the root
+    if (_isRoot && node.children.length > 0) {
+        await generateBookSummary(node, lorebookName);
+    }
+}
+
+/**
+ * Generate a book-level summary from top-level category labels and summaries.
+ * Stored on the root node's summary field. Only overwrites if no user description is set.
+ */
+async function generateBookSummary(rootNode, lorebookName) {
+    // Don't overwrite user-set description
+    const { getBookDescription } = await import('./tree-store.js');
+    if (getBookDescription(lorebookName)) return;
+
+    const categoryList = rootNode.children
+        .map(c => c.summary ? `- ${c.label}: ${c.summary}` : `- ${c.label}`)
+        .join('\n');
+
+    if (!categoryList) return;
+
+    try {
+        const totalEntries = getAllEntryUids(rootNode).length;
+        const summary = await generateRaw({
+            prompt: `This lorebook "${lorebookName}" has ${totalEntries} entries organized into these categories:\n${categoryList}\n\nWrite a brief 1-2 sentence description of what this lorebook contains overall — what kind of information does it store? Return ONLY the description.`,
+            systemPrompt: 'You are a summarization assistant. Return only the requested description, no commentary.',
+        });
+        if (summary) {
+            rootNode.summary = summary.trim();
+            console.log(`[TunnelVision] Generated book summary for "${lorebookName}": ${rootNode.summary}`);
+        }
+    } catch (e) {
+        console.warn(`[TunnelVision] Book summary generation failed for "${lorebookName}":`, e);
+    }
 }
 
 /**

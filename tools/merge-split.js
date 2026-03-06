@@ -10,7 +10,7 @@
 
 import { getSettings } from '../tree-store.js';
 import { mergeEntries, splitEntry, findEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks } from '../tool-registry.js';
+import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_MergeSplit';
 
@@ -19,10 +19,7 @@ export const TOOL_NAME = 'TunnelVision_MergeSplit';
  * @returns {Object}
  */
 export function getDefinition() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    const bookList = activeBooks.length > 0
-        ? activeBooks.join(', ')
-        : '(none active)';
+    const bookDesc = getBookListWithDescriptions();
 
     return {
         name: TOOL_NAME,
@@ -33,14 +30,15 @@ Actions:
 - "merge": Combine two entries into one. You must provide keep_uid (entry to keep) and remove_uid (entry to absorb). Optionally provide a rewritten merged_content and merged_title.
 - "split": Divide one entry into two. You must provide the uid to split and specify what content stays (keep_content) vs. what becomes a new entry (new_content, new_title).
 
-Active lorebooks: ${bookList}`,
+Available lorebooks:
+${bookDesc}`,
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
             properties: {
                 lorebook: {
                     type: 'string',
-                    description: `Which lorebook the entries belong to. Available: ${bookList}`,
+                    description: `Which lorebook the entries belong to:\n${bookDesc}`,
                 },
                 action: {
                     type: 'string',
@@ -94,14 +92,12 @@ Active lorebooks: ${bookList}`,
             required: ['lorebook', 'action'],
         },
         action: async (args) => {
-            if (!args?.lorebook || !args?.action) {
-                return 'Missing required fields: lorebook and action are required.';
+            if (!args?.action) {
+                return 'Missing required field: action is required.';
             }
 
-            const currentBooks = getActiveTunnelVisionBooks();
-            if (!currentBooks.includes(args.lorebook)) {
-                return `Lorebook "${args.lorebook}" is not active. Available: ${currentBooks.join(', ')}`;
-            }
+            const { book: lorebook, error } = resolveTargetBook(args.lorebook);
+            if (error) return error;
 
             switch (args.action) {
                 case 'merge': {
@@ -113,7 +109,7 @@ Active lorebooks: ${bookList}`,
                     }
                     try {
                         const result = await mergeEntries(
-                            args.lorebook,
+                            lorebook,
                             Number(args.keep_uid),
                             Number(args.remove_uid),
                             {
@@ -144,7 +140,7 @@ Active lorebooks: ${bookList}`,
                     }
                     try {
                         const result = await splitEntry(
-                            args.lorebook,
+                            lorebook,
                             Number(args.uid),
                             {
                                 keepContent: args.keep_content,

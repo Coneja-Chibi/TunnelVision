@@ -9,7 +9,7 @@ import { ToolManager } from '../../../tool-calling.js';
 import { selected_world_info, world_info, loadWorldInfo, METADATA_KEY } from '../../../world-info.js';
 import { characters, this_chid, chat_metadata } from '../../../../script.js';
 import { getCharaFilename } from '../../../utils.js';
-import { isLorebookEnabled, getSettings } from './tree-store.js';
+import { isLorebookEnabled, getSettings, getTree, getBookDescription } from './tree-store.js';
 
 import { getDefinition as getSearchDef, TOOL_NAME as SEARCH_NAME } from './tools/search.js';
 import { getDefinition as getRememberDef, TOOL_NAME as REMEMBER_NAME } from './tools/remember.js';
@@ -107,6 +107,72 @@ export function getActiveTunnelVisionBooks() {
         if (isLorebookEnabled(bookName)) active.push(bookName);
     }
     return active;
+}
+
+/**
+ * Resolve which lorebook to write to. Auto-corrects when only one book is active.
+ * @param {string|undefined} requestedBook - The lorebook name the AI provided.
+ * @returns {{ book: string, error: string|null }} The resolved book name, or an error message.
+ */
+export function resolveTargetBook(requestedBook) {
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length === 0) {
+        return { book: '', error: 'No active TunnelVision lorebooks.' };
+    }
+
+    // Single book: always use it, regardless of what the AI typed
+    if (activeBooks.length === 1) {
+        return { book: activeBooks[0], error: null };
+    }
+
+    // Multiple books: validate the AI's choice
+    if (!requestedBook) {
+        const desc = getBookListWithDescriptions();
+        return { book: '', error: `Multiple lorebooks active. You must specify which one.\n${desc}` };
+    }
+    if (!activeBooks.includes(requestedBook)) {
+        const desc = getBookListWithDescriptions();
+        return { book: '', error: `Lorebook "${requestedBook}" is not active.\n${desc}` };
+    }
+    return { book: requestedBook, error: null };
+}
+
+/**
+ * Build a descriptive list of active lorebooks for tool descriptions.
+ * Uses user-set description, falls back to tree root summary, falls back to top-level labels.
+ * @returns {string} Formatted multi-line description of available lorebooks.
+ */
+export function getBookListWithDescriptions() {
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length === 0) return '(none active)';
+
+    const lines = [];
+    for (const bookName of activeBooks) {
+        const userDesc = getBookDescription(bookName);
+        if (userDesc) {
+            lines.push(`- "${bookName}": ${userDesc}`);
+            continue;
+        }
+
+        // Fall back to tree root summary
+        const tree = getTree(bookName);
+        if (tree?.root?.summary && tree.root.summary !== `Top-level index for ${bookName}`) {
+            lines.push(`- "${bookName}": ${tree.root.summary}`);
+            continue;
+        }
+
+        // Fall back to listing top-level category labels
+        if (tree?.root?.children?.length > 0) {
+            const labels = tree.root.children.map(c => c.label).slice(0, 6).join(', ');
+            const more = tree.root.children.length > 6 ? ` (+${tree.root.children.length - 6} more)` : '';
+            lines.push(`- "${bookName}": Contains: ${labels}${more}`);
+            continue;
+        }
+
+        lines.push(`- "${bookName}"`);
+    }
+
+    return lines.join('\n');
 }
 
 /**

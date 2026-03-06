@@ -14,7 +14,7 @@
 
 import { getTree, findNodeById, createTreeNode, saveTree, getSettings } from '../tree-store.js';
 import { createEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks } from '../tool-registry.js';
+import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 import { getContext } from '../../../../st-context.js';
 import { hideChatMessageRange } from '../../../../chats.js';
 
@@ -130,10 +130,7 @@ function ensureSummariesNode(bookName) {
  * @returns {Object}
  */
 export function getDefinition() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    const bookList = activeBooks.length > 0
-        ? activeBooks.join(', ')
-        : '(none active)';
+    const bookDesc = getBookListWithDescriptions();
 
     return {
         name: TOOL_NAME,
@@ -144,7 +141,8 @@ This is different from Remember: Remember stores facts and entity information (w
 
 Write summaries in past tense, third person, capturing the key actions, participants, outcomes, and emotional beats. Be concise but thorough — this summary replaces the need to re-read the full scene.
 
-Active lorebooks: ${bookList}
+Available lorebooks:
+${bookDesc}
 
 Provide messages_back to indicate roughly how many messages this summary covers (counting back from current). Summarized messages may be hidden from chat to save tokens — the summary preserves them.
 
@@ -155,7 +153,7 @@ When you notice related events forming a pattern or storyline, group them into "
             properties: {
                 lorebook: {
                     type: 'string',
-                    description: `Which lorebook to save the summary to. Available: ${bookList}`,
+                    description: `Which lorebook to save the summary to. Choose based on content type:\n${bookDesc}`,
                 },
                 title: {
                     type: 'string',
@@ -191,17 +189,15 @@ When you notice related events forming a pattern or storyline, group them into "
             required: ['lorebook', 'title', 'summary'],
         },
         action: async (args) => {
-            if (!args?.lorebook || !args?.title || !args?.summary) {
-                return 'Missing required fields: lorebook, title, and summary are all required.';
+            if (!args?.title || !args?.summary) {
+                return 'Missing required fields: title and summary are required.';
             }
 
-            const currentBooks = getActiveTunnelVisionBooks();
-            if (!currentBooks.includes(args.lorebook)) {
-                return `Lorebook "${args.lorebook}" is not active. Available: ${currentBooks.join(', ')}`;
-            }
+            const { book: lorebook, error } = resolveTargetBook(args.lorebook);
+            if (error) return error;
 
             // Ensure the Summaries category exists
-            const summariesNodeId = ensureSummariesNode(args.lorebook);
+            const summariesNodeId = ensureSummariesNode(lorebook);
 
             // Determine target node (summaries, arc, or new arc)
             let targetNodeId = summariesNodeId;
@@ -209,7 +205,7 @@ When you notice related events forming a pattern or storyline, group them into "
 
             if (args.create_arc) {
                 // Create a new arc node under Summaries
-                const tree = getTree(args.lorebook);
+                const tree = getTree(lorebook);
                 if (tree && tree.root) {
                     const summNode = findNodeById(tree.root, summariesNodeId);
                     if (summNode) {
@@ -217,7 +213,7 @@ When you notice related events forming a pattern or storyline, group them into "
                         arcNode.isArc = true;
                         summNode.children = summNode.children || [];
                         summNode.children.push(arcNode);
-                        saveTree(args.lorebook, tree);
+                        saveTree(lorebook, tree);
                         targetNodeId = arcNode.id;
                         arcLabel = args.create_arc;
                         console.log(`[TunnelVision] Created arc "${args.create_arc}" (${arcNode.id})`);
@@ -225,7 +221,7 @@ When you notice related events forming a pattern or storyline, group them into "
                 }
             } else if (args.arc_node_id) {
                 // Assign to existing arc
-                const tree = getTree(args.lorebook);
+                const tree = getTree(lorebook);
                 if (tree && tree.root) {
                     const arcNode = findNodeById(tree.root, args.arc_node_id);
                     if (arcNode) {
@@ -251,13 +247,13 @@ When you notice related events forming a pattern or storyline, group them into "
             keys.push(`summary:${significance}`);
 
             try {
-                const result = await createEntry(args.lorebook, {
+                const result = await createEntry(lorebook, {
                     content,
                     comment: `[Summary] ${args.title}`,
                     keys,
                     nodeId: targetNodeId,
                 });
-                let response = `Summarized: "${args.title}" (UID ${result.uid}) → "${result.nodeLabel}" in "${args.lorebook}". Significance: ${significance}.`;
+                let response = `Summarized: "${args.title}" (UID ${result.uid}) → "${result.nodeLabel}" in "${lorebook}". Significance: ${significance}.`;
                 if (arcLabel) {
                     response += ` Arc: "${arcLabel}".`;
                 }

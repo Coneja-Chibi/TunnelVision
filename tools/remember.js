@@ -11,7 +11,7 @@
 import { loadWorldInfo } from '../../../../world-info.js';
 import { getSettings } from '../tree-store.js';
 import { createEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks } from '../tool-registry.js';
+import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_Remember';
 
@@ -97,10 +97,7 @@ async function findSimilarEntries(bookName, newContent, newTitle, threshold) {
  * @returns {Object}
  */
 export function getDefinition() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    const bookList = activeBooks.length > 0
-        ? activeBooks.join(', ')
-        : '(none active)';
+    const bookDesc = getBookListWithDescriptions();
 
     return {
         name: TOOL_NAME,
@@ -109,16 +106,17 @@ export function getDefinition() {
 
 You can also use this to create TRACKER entries — structured schemas for tracking things like character moods, inventory, relationships, positions, or any other state that changes over time. When creating a tracker, design a clear structured format (use headers, bullet points, key:value pairs) that will be easy to update later with TunnelVision_Update. The user may ask you to help design a tracker schema — propose a structured format, discuss it with them, and save the final version.
 
-Active lorebooks: ${bookList}
+Available lorebooks:
+${bookDesc}
 
-Provide a descriptive title, the content to remember, optional keywords for cross-referencing, and optionally a tree node_id to file it under (omit to place at root).`,
+Save entries to the lorebook where they belong based on the descriptions above. Provide a descriptive title, the content to remember, optional keywords for cross-referencing, and optionally a tree node_id to file it under (omit to place at root).`,
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
             properties: {
                 lorebook: {
                     type: 'string',
-                    description: `Which lorebook to save to. Available: ${bookList}`,
+                    description: `Which lorebook to save to. Choose based on content type:\n${bookDesc}`,
                 },
                 title: {
                     type: 'string',
@@ -141,14 +139,12 @@ Provide a descriptive title, the content to remember, optional keywords for cros
             required: ['lorebook', 'title', 'content'],
         },
         action: async (args) => {
-            if (!args?.lorebook || !args?.title || !args?.content) {
-                return 'Missing required fields: lorebook, title, and content are all required.';
+            if (!args?.title || !args?.content) {
+                return 'Missing required fields: title and content are required.';
             }
 
-            const currentBooks = getActiveTunnelVisionBooks();
-            if (!currentBooks.includes(args.lorebook)) {
-                return `Lorebook "${args.lorebook}" is not active. Available: ${currentBooks.join(', ')}`;
-            }
+            const { book: lorebook, error } = resolveTargetBook(args.lorebook);
+            if (error) return error;
 
             // Dedup check (non-blocking — warns but still saves)
             let dedupWarning = '';
@@ -156,7 +152,7 @@ Provide a descriptive title, the content to remember, optional keywords for cros
             if (settings.enableVectorDedup) {
                 const threshold = settings.vectorDedupThreshold || 0.85;
                 const matches = await findSimilarEntries(
-                    args.lorebook, args.content, args.title, threshold,
+                    lorebook, args.content, args.title, threshold,
                 );
                 if (matches.length > 0) {
                     const lines = matches.map(
@@ -168,13 +164,13 @@ Provide a descriptive title, the content to remember, optional keywords for cros
             }
 
             try {
-                const result = await createEntry(args.lorebook, {
+                const result = await createEntry(lorebook, {
                     content: args.content,
                     comment: args.title,
                     keys: args.keys || [],
                     nodeId: args.node_id || null,
                 });
-                return `Saved memory: "${result.comment}" (UID ${result.uid}) → category "${result.nodeLabel}" in "${args.lorebook}".${dedupWarning}`;
+                return `Saved memory: "${result.comment}" (UID ${result.uid}) → category "${result.nodeLabel}" in "${lorebook}".${dedupWarning}`;
             } catch (e) {
                 console.error('[TunnelVision] Remember failed:', e);
                 return `Failed to save memory: ${e.message}`;

@@ -7,7 +7,7 @@
 
 import { getTree, findNodeById, getSettings, getAllEntryUids } from '../tree-store.js';
 import { moveEntry, createCategory, listNodeEntries } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks } from '../tool-registry.js';
+import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_Reorganize';
 
@@ -16,10 +16,7 @@ export const TOOL_NAME = 'TunnelVision_Reorganize';
  * @returns {Object}
  */
 export function getDefinition() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    const bookList = activeBooks.length > 0
-        ? activeBooks.join(', ')
-        : '(none active)';
+    const bookDesc = getBookListWithDescriptions();
 
     return {
         name: TOOL_NAME,
@@ -31,14 +28,15 @@ Actions:
 - "create_category": Create a new category node under a parent
 - "list_entries": List entries in a specific node (to find UIDs for moving)
 
-Active lorebooks: ${bookList}`,
+Available lorebooks:
+${bookDesc}`,
         parameters: {
             $schema: 'http://json-schema.org/draft-04/schema#',
             type: 'object',
             properties: {
                 lorebook: {
                     type: 'string',
-                    description: `Which lorebook to reorganize. Available: ${bookList}`,
+                    description: `Which lorebook to reorganize:\n${bookDesc}`,
                 },
                 action: {
                     type: 'string',
@@ -65,14 +63,12 @@ Active lorebooks: ${bookList}`,
             required: ['lorebook', 'action'],
         },
         action: async (args) => {
-            if (!args?.lorebook || !args?.action) {
-                return 'Missing required fields: lorebook and action are required.';
+            if (!args?.action) {
+                return 'Missing required field: action is required.';
             }
 
-            const activeBooks = getActiveTunnelVisionBooks();
-            if (!activeBooks.includes(args.lorebook)) {
-                return `Lorebook "${args.lorebook}" is not active. Available: ${activeBooks.join(', ')}`;
-            }
+            const { book: lorebook, error } = resolveTargetBook(args.lorebook);
+            if (error) return error;
 
             switch (args.action) {
                 case 'move': {
@@ -80,7 +76,7 @@ Active lorebooks: ${bookList}`,
                         return 'Move requires both "uid" and "target_node_id".';
                     }
                     try {
-                        const result = await moveEntry(args.lorebook, Number(args.uid), args.target_node_id);
+                        const result = await moveEntry(lorebook, Number(args.uid), args.target_node_id);
                         return `Moved entry UID ${result.uid}: "${result.fromLabel}" → "${result.toLabel}".`;
                     } catch (e) {
                         console.error('[TunnelVision] Move failed:', e);
@@ -93,7 +89,7 @@ Active lorebooks: ${bookList}`,
                         return 'create_category requires a "label" for the new category.';
                     }
                     try {
-                        const result = createCategory(args.lorebook, args.label, args.target_node_id || null);
+                        const result = createCategory(lorebook, args.label, args.target_node_id || null);
                         return `Created category "${result.label}" (ID: ${result.nodeId}) under "${result.parentLabel}".`;
                     } catch (e) {
                         console.error('[TunnelVision] Create category failed:', e);
@@ -106,7 +102,7 @@ Active lorebooks: ${bookList}`,
                         return 'list_entries requires a "node_id" to list entries from.';
                     }
                     try {
-                        const entries = await listNodeEntries(args.lorebook, args.node_id);
+                        const entries = await listNodeEntries(lorebook, args.node_id);
                         if (entries.length === 0) {
                             return `Node has no entries.`;
                         }

@@ -109,6 +109,27 @@ export function setLorebookEnabled(lorebookName, enabled) {
 }
 
 /**
+ * Get the user-set description for a lorebook, or empty string.
+ * @param {string} lorebookName
+ * @returns {string}
+ */
+export function getBookDescription(lorebookName) {
+    ensureSettings();
+    return extension_settings[EXTENSION_NAME].bookDescriptions[lorebookName] || '';
+}
+
+/**
+ * Set a user description for a lorebook.
+ * @param {string} lorebookName
+ * @param {string} description
+ */
+export function setBookDescription(lorebookName, description) {
+    ensureSettings();
+    extension_settings[EXTENSION_NAME].bookDescriptions[lorebookName] = description;
+    saveSettingsDebounced();
+}
+
+/**
  * Find a node by ID in the tree (depth-first).
  * @param {TreeNode} node
  * @param {string} nodeId
@@ -247,6 +268,7 @@ const SETTING_DEFAULTS = {
     globalEnabled: true,
     trees: {},
     enabledLorebooks: {},
+    bookDescriptions: {},
     connectionProfile: null,
     disabledTools: {},
     searchMode: 'traversal',

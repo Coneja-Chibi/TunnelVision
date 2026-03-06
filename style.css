@@ -423,6 +423,30 @@
     box-shadow: 0 0 0 3px rgba(240, 148, 108, 0.15);
 }
 
+.tv-textarea {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--black30a, rgba(0, 0, 0, 0.15));
+    color: var(--SmartThemeBodyColor);
+    border: 1px solid rgba(240, 148, 108, 0.25);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    transition: all 0.2s ease;
+}
+
+.tv-textarea:hover {
+    border-color: rgba(240, 148, 108, 0.5);
+    background: var(--black50a, rgba(0, 0, 0, 0.25));
+}
+
+.tv-textarea:focus {
+    outline: none;
+    border-color: #f0946c;
+    box-shadow: 0 0 0 3px rgba(240, 148, 108, 0.15);
+}
+
 /* ===== Buttons ===== */
 .tv-button-row {
     display: flex;
