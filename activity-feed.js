@@ -133,40 +133,21 @@ function icon(iconClass) {
     return i;
 }
 
-// ── Settings shortcut ──
+// ── Tree editor shortcut ──
 
 /**
- * Open the TunnelVision settings panel in the extensions drawer.
- * Opens the drawer if closed, scrolls to the TV settings, and expands if collapsed.
+ * Open the tree editor popup for the first active TunnelVision lorebook.
+ * If no lorebook is active or no tree is built, falls back to clicking
+ * the tree editor button in settings (which shows a toast).
  */
-function openTunnelVisionSettings() {
-    const drawer = document.getElementById('rm_extensions_block');
-    if (!drawer) return;
-
-    // Open the extensions drawer if it's closed
-    if (drawer.classList.contains('closedDrawer')) {
-        const toggle = document.querySelector('#extensions-settings-button .drawer-toggle');
-        if (toggle) toggle.click();
+function openTreeEditor() {
+    // Trigger the existing tree editor button — it handles lorebook
+    // selection, validation, and the full popup lifecycle.
+    const btn = document.getElementById('tv_open_tree_editor');
+    if (btn) {
+        btn.click();
+        return;
     }
-
-    // Wait for drawer open animation, then scroll and expand
-    requestAnimationFrame(() => {
-        const tvSettings = document.getElementById('tunnelvision_settings');
-        if (!tvSettings) return;
-
-        // Expand the settings body if collapsed
-        const body = tvSettings.querySelector('.tv-settings-body');
-        if (body && body.style.display === 'none') {
-            const headerToggle = document.getElementById('tv_header_toggle');
-            if (headerToggle) {
-                headerToggle.classList.add('expanded');
-            }
-            $(body).slideDown(200);
-        }
-
-        // Scroll into view
-        tvSettings.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
 }
 
 // ── Trigger Button ──
@@ -245,9 +226,9 @@ function createPanel() {
     title.append(' TunnelVision Feed');
     header.appendChild(title);
     const settingsBtn = el('button', 'tv-float-panel-btn');
-    settingsBtn.title = 'Open TunnelVision settings';
-    settingsBtn.appendChild(icon('fa-gear'));
-    settingsBtn.addEventListener('click', openTunnelVisionSettings);
+    settingsBtn.title = 'Open tree editor';
+    settingsBtn.appendChild(icon('fa-folder-tree'));
+    settingsBtn.addEventListener('click', openTreeEditor);
     header.appendChild(settingsBtn);
 
     const clearBtn = el('button', 'tv-float-panel-btn');
