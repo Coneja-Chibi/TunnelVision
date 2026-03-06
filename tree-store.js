@@ -6,8 +6,10 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
+import { loadWorldInfo } from '../../../world-info.js';
 
 const EXTENSION_NAME = 'tunnelvision';
+const TRACKER_TITLE_PREFIX = /^\[tracker[^\]]*\]/i;
 
 /**
  * @typedef {Object} TreeNode
@@ -72,6 +74,7 @@ export function getTree(lorebookName) {
  */
 export function saveTree(lorebookName, tree) {
     ensureSettings();
+    normalizeTree(tree, lorebookName);
     tree.lorebookName = lorebookName;
     extension_settings[EXTENSION_NAME].trees[lorebookName] = tree;
     saveSettingsDebounced();
@@ -268,6 +271,7 @@ const SETTING_DEFAULTS = {
     globalEnabled: true,
     trees: {},
     enabledLorebooks: {},
+    selectedLorebook: null,
     bookDescriptions: {},
     connectionProfile: null,
     disabledTools: {},
@@ -288,6 +292,9 @@ const SETTING_DEFAULTS = {
     notebookEnabled: true,
     stealthMode: false,
     autoHideSummarized: true,
+    passthroughConstant: true,
+    confirmTools: {},
+    toolPromptOverrides: {},
 };
 
 function ensureSettings() {
@@ -295,21 +302,297 @@ function ensureSettings() {
         extension_settings[EXTENSION_NAME] = {};
     }
     const s = extension_settings[EXTENSION_NAME];
+    let didMutate = false;
     for (const [key, defaultVal] of Object.entries(SETTING_DEFAULTS)) {
         if (s[key] === undefined || s[key] === null) {
-            // For objects/arrays, clone the default to prevent shared references
             s[key] = (typeof defaultVal === 'object' && defaultVal !== null)
                 ? JSON.parse(JSON.stringify(defaultVal))
                 : defaultVal;
+            didMutate = true;
         }
     }
     // Migration: old 'keys' detail level was renamed to 'lite'
     if (s.llmBuildDetail === 'keys') {
         s.llmBuildDetail = 'lite';
+        didMutate = true;
+    }
+
+    if (normalizeTrackerSettings(s)) {
+        didMutate = true;
+    }
+
+    if (normalizeConnectionProfileSetting(s)) {
+        didMutate = true;
+    }
+
+    for (const [bookName, tree] of Object.entries(s.trees || {})) {
+        if (normalizeTree(tree, bookName)) {
+            didMutate = true;
+        }
+    }
+
+    if (didMutate) {
+        saveSettingsDebounced();
     }
 }
 
 export function getSettings() {
     ensureSettings();
     return extension_settings[EXTENSION_NAME];
+}
+
+function normalizeTree(tree, lorebookName) {
+    if (!tree || typeof tree !== 'object') return false;
+
+    let mutated = false;
+    if (typeof tree.lorebookName !== 'string' || !tree.lorebookName) {
+        tree.lorebookName = lorebookName;
+        mutated = true;
+    }
+
+    if (!tree.root || typeof tree.root !== 'object') {
+        tree.root = createTreeNode('Root', `Top-level index for ${tree.lorebookName}`);
+        mutated = true;
+    }
+
+    if (typeof tree.version !== 'number' || !Number.isFinite(tree.version)) {
+        tree.version = 1;
+        mutated = true;
+    }
+
+    if (typeof tree.lastBuilt !== 'number' || !Number.isFinite(tree.lastBuilt)) {
+        tree.lastBuilt = Date.now();
+        mutated = true;
+    }
+
+    if (normalizeTreeNode(tree.root)) {
+        mutated = true;
+    }
+
+    return mutated;
+}
+
+function normalizeTreeNode(node) {
+    if (!node || typeof node !== 'object') return false;
+
+    let mutated = false;
+    if (typeof node.id !== 'string' || !node.id) {
+        node.id = generateNodeId();
+        mutated = true;
+    }
+    if (typeof node.label !== 'string') {
+        node.label = 'Unnamed';
+        mutated = true;
+    }
+    if (typeof node.summary !== 'string') {
+        node.summary = '';
+        mutated = true;
+    }
+    if (!Array.isArray(node.entryUids)) {
+        node.entryUids = [];
+        mutated = true;
+    }
+    if (!Array.isArray(node.children)) {
+        node.children = [];
+        mutated = true;
+    }
+    if (typeof node.collapsed !== 'boolean') {
+        node.collapsed = Boolean(node._collapsed);
+        mutated = true;
+    }
+    if ('_collapsed' in node) {
+        delete node._collapsed;
+        mutated = true;
+    }
+
+    for (const child of node.children) {
+        if (normalizeTreeNode(child)) {
+            mutated = true;
+        }
+    }
+
+    return mutated;
+}
+
+function normalizeTrackerSettings(settings) {
+    const trackerUids = settings.trackerUids;
+    if (!trackerUids || typeof trackerUids !== 'object' || Array.isArray(trackerUids)) {
+        settings.trackerUids = {};
+        return true;
+    }
+
+    let mutated = false;
+    for (const [bookName, rawUids] of Object.entries(trackerUids)) {
+        const next = Array.isArray(rawUids)
+            ? [...new Set(rawUids.map(uid => Number(uid)).filter(uid => Number.isFinite(uid)))]
+            : [];
+
+        if (next.length === 0) {
+            if (Array.isArray(rawUids) && rawUids.length === 0) continue;
+            delete trackerUids[bookName];
+            mutated = true;
+            continue;
+        }
+
+        next.sort((a, b) => a - b);
+        if (!Array.isArray(rawUids) || rawUids.length !== next.length || rawUids.some((uid, index) => uid !== next[index])) {
+            trackerUids[bookName] = next;
+            mutated = true;
+        }
+    }
+
+    return mutated;
+}
+
+function normalizeConnectionProfileSetting(settings) {
+    const current = settings.connectionProfile;
+    if (!current || typeof current !== 'string') return false;
+
+    const profiles = getConnectionProfiles();
+    if (profiles.some(profile => profile.id === current)) {
+        return false;
+    }
+
+    const legacyMatch = profiles.find(profile => profile.name === current);
+    if (legacyMatch) {
+        settings.connectionProfile = legacyMatch.id;
+        return true;
+    }
+
+    return false;
+}
+
+function getConnectionProfiles() {
+    const profiles = extension_settings?.connectionManager?.profiles;
+    return Array.isArray(profiles) ? profiles : [];
+}
+
+function resolveEntriesMap(entriesOrBookData) {
+    if (!entriesOrBookData || typeof entriesOrBookData !== 'object') return null;
+    if (entriesOrBookData.entries && typeof entriesOrBookData.entries === 'object') {
+        return entriesOrBookData.entries;
+    }
+    return entriesOrBookData;
+}
+
+function getTrackerSet(bookName) {
+    ensureSettings();
+    const trackerUids = extension_settings[EXTENSION_NAME].trackerUids;
+    return new Set(Array.isArray(trackerUids[bookName]) ? trackerUids[bookName] : []);
+}
+
+function storeTrackerSet(bookName, trackerSet) {
+    const settings = getSettings();
+    const next = [...trackerSet].sort((a, b) => a - b);
+    if (next.length > 0) {
+        settings.trackerUids[bookName] = next;
+    } else {
+        delete settings.trackerUids[bookName];
+    }
+}
+
+export function getSelectedLorebook() {
+    const settings = getSettings();
+    return settings.selectedLorebook || null;
+}
+
+export function setSelectedLorebook(lorebookName) {
+    const settings = getSettings();
+    settings.selectedLorebook = lorebookName || null;
+    saveSettingsDebounced();
+}
+
+export function getConnectionProfileId() {
+    const settings = getSettings();
+    return settings.connectionProfile || null;
+}
+
+export function setConnectionProfileId(profileId) {
+    const settings = getSettings();
+    settings.connectionProfile = profileId || null;
+    saveSettingsDebounced();
+}
+
+export function findConnectionProfile(profileRef = null) {
+    const ref = profileRef ?? getConnectionProfileId();
+    if (!ref) return null;
+
+    const profiles = getConnectionProfiles();
+    return profiles.find(profile => profile.id === ref || profile.name === ref) || null;
+}
+
+export function getConnectionProfileName(profileRef = null) {
+    return findConnectionProfile(profileRef)?.name || null;
+}
+
+export function listConnectionProfiles() {
+    return [...getConnectionProfiles()];
+}
+
+export function isTrackerTitle(title) {
+    return TRACKER_TITLE_PREFIX.test(String(title || '').trim());
+}
+
+export function getTrackerUids(bookName) {
+    return [...getTrackerSet(bookName)];
+}
+
+export function isTrackerUid(bookName, uid) {
+    return getTrackerSet(bookName).has(Number(uid));
+}
+
+export function setTrackerUid(bookName, uid, tracked, { save = true } = {}) {
+    const trackerSet = getTrackerSet(bookName);
+    const numericUid = Number(uid);
+    if (!Number.isFinite(numericUid)) return false;
+
+    const hadUid = trackerSet.has(numericUid);
+    if (tracked) {
+        trackerSet.add(numericUid);
+    } else {
+        trackerSet.delete(numericUid);
+    }
+
+    if (hadUid === trackerSet.has(numericUid)) {
+        return false;
+    }
+
+    storeTrackerSet(bookName, trackerSet);
+    if (save) {
+        saveSettingsDebounced();
+    }
+    return true;
+}
+
+export async function syncTrackerUidsForLorebook(bookName, entriesOrBookData = null, { save = true } = {}) {
+    const entries = entriesOrBookData ? resolveEntriesMap(entriesOrBookData) : resolveEntriesMap(await loadWorldInfo(bookName));
+    const trackerSet = getTrackerSet(bookName);
+    const next = new Set();
+
+    if (entries) {
+        for (const key of Object.keys(entries)) {
+            const entry = entries[key];
+            if (!entry || entry.disable) continue;
+
+            const shouldTrack = trackerSet.has(entry.uid) || isTrackerTitle(entry.comment);
+            if (shouldTrack) {
+                next.add(entry.uid);
+            }
+        }
+    }
+
+    const current = [...trackerSet].sort((a, b) => a - b);
+    const normalized = [...next].sort((a, b) => a - b);
+    const changed = current.length !== normalized.length || current.some((uid, index) => uid !== normalized[index]);
+
+    if (!changed) {
+        return normalized;
+    }
+
+    storeTrackerSet(bookName, next);
+    if (save) {
+        saveSettingsDebounced();
+    }
+
+    return normalized;
 }

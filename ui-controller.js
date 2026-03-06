@@ -5,8 +5,7 @@
 
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
-import { selected_world_info, world_names, loadWorldInfo, saveWorldInfo } from '../../../world-info.js';
-import { extension_settings } from '../../../extensions.js';
+import { world_names, loadWorldInfo, saveWorldInfo } from '../../../world-info.js';
 import { getAutoSummaryCount, resetAutoSummaryCount } from './auto-summary.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
 import {
@@ -23,15 +22,44 @@ import {
     getSettings,
     getBookDescription,
     setBookDescription,
+    getSelectedLorebook,
+    setSelectedLorebook,
+    getConnectionProfileId,
+    setConnectionProfileId,
+    listConnectionProfiles,
+    isTrackerUid,
+    isTrackerTitle,
+    setTrackerUid,
+    syncTrackerUidsForLorebook,
 } from './tree-store.js';
 import { buildTreeFromMetadata, buildTreeWithLLM, generateSummariesForTree, ingestChatMessages } from './tree-builder.js';
-import { registerTools, unregisterTools } from './tool-registry.js';
+import { registerTools, unregisterTools, getDefaultToolDescriptions } from './tool-registry.js';
 import { runDiagnostics } from './diagnostics.js';
 import { applyRecurseLimit } from './index.js';
+import { refreshHiddenToolCallMessages } from './activity-feed.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 
 
 let currentLorebook = null;
+
+function selectCurrentLorebook(bookName) {
+    currentLorebook = bookName || null;
+    setSelectedLorebook(currentLorebook);
+}
+
+function syncSelectedLorebook() {
+    if (currentLorebook && world_names?.includes(currentLorebook)) {
+        return;
+    }
+
+    const preferredLorebook = getSelectedLorebook();
+    if (preferredLorebook && world_names?.includes(preferredLorebook)) {
+        currentLorebook = preferredLorebook;
+        return;
+    }
+
+    currentLorebook = null;
+}
 
 // ─── Event Bindings ──────────────────────────────────────────────
 
@@ -65,6 +93,13 @@ export function bindUIEvents() {
     // Per-tool toggles
     $(document).on('change', '.tv_tool_enabled', onToolToggle);
 
+    // Per-tool confirmation toggles
+    $('.tv_tool_confirm').on('change', onToolConfirmToggle);
+
+    // Tool prompt overrides
+    $('#tv_tool_prompt_overrides').on('input', '.tv-tool-prompt-textarea', onToolPromptChange);
+    $('#tv_tool_prompt_overrides').on('click', '.tv-tool-prompt-reset', onToolPromptReset);
+
     // Search mode radio
     $('input[name="tv_search_mode"]').on('change', onSearchModeChange);
 
@@ -97,6 +132,7 @@ export function bindUIEvents() {
     $('#tv_auto_summary_enabled').on('change', onAutoSummaryToggle);
     $('#tv_auto_summary_interval').on('change', onAutoSummaryIntervalChange);
     $('#tv_auto_hide_summarized').on('change', onAutoHideSummarizedToggle);
+    $('#tv_passthrough_constant').on('change', onPassthroughConstantToggle);
 
     // Multi-book mode
     $('input[name="tv_multi_book_mode"]').on('change', onMultiBookModeChange);
@@ -117,6 +153,7 @@ export function bindUIEvents() {
 export function refreshUI() {
     const settings = getSettings();
     const globalEnabled = settings.globalEnabled !== false;
+    syncSelectedLorebook();
 
     $('#tv_global_enabled').prop('checked', globalEnabled);
     $('#tv_main_controls').toggle(globalEnabled);
@@ -127,6 +164,16 @@ export function refreshUI() {
         const toolName = $(this).data('tool');
         $(this).prop('checked', !disabledTools[toolName]);
     });
+
+    // Sync tool confirmation toggles
+    const confirmTools = settings.confirmTools || {};
+    $('.tv_tool_confirm').each(function () {
+        const toolName = $(this).data('tool');
+        $(this).prop('checked', !!confirmTools[toolName]);
+    });
+
+    // Render tool prompt overrides
+    renderToolPromptOverrides();
 
     // Sync search mode radio
     $(`input[name="tv_search_mode"][value="${settings.searchMode || 'traversal'}"]`).prop('checked', true);
@@ -165,6 +212,7 @@ export function refreshUI() {
     $('#tv_auto_summary_interval').val(settings.autoSummaryInterval ?? 20);
     $('#tv_auto_summary_count').text(getAutoSummaryCount());
     $('#tv_auto_hide_summarized').prop('checked', settings.autoHideSummarized !== false);
+    $('#tv_passthrough_constant').prop('checked', settings.passthroughConstant !== false);
 
     // Sync multi-book mode
     $(`input[name="tv_multi_book_mode"][value="${settings.multiBookMode || 'unified'}"]`).prop('checked', true);
@@ -189,6 +237,7 @@ function onLorebookFilter() {
 }
 
 function populateLorebookDropdown() {
+    syncSelectedLorebook();
     const $list = $('#tv_lorebook_list');
     $list.empty();
 
@@ -245,7 +294,7 @@ function populateLorebookDropdown() {
         $card.append($dot, $info);
 
         $card.on('click', () => {
-            currentLorebook = name;
+            selectCurrentLorebook(name);
             $('.tv-lorebook-card').removeClass('tv-lorebook-selected');
             $card.addClass('tv-lorebook-selected');
             $('#tv_lorebook_controls').show();
@@ -270,18 +319,22 @@ function onGlobalToggle() {
 function onLorebookSelect() {
     // Legacy handler for hidden select (kept for compatibility)
     const bookName = $(this).val();
-    currentLorebook = bookName || null;
+    selectCurrentLorebook(bookName || null);
     $('#tv_lorebook_controls').toggle(!!bookName);
     if (bookName) loadLorebookUI(bookName);
 }
 
 async function loadLorebookUI(bookName) {
+    const bookData = await loadWorldInfo(bookName);
+    if (bookData?.entries) {
+        await syncTrackerUidsForLorebook(bookName, bookData.entries);
+    }
     $('#tv_lorebook_enabled').prop('checked', isLorebookEnabled(bookName));
     $('#tv_book_description').val(getBookDescription(bookName) || '');
     const tree = getTree(bookName);
     updateTreeStatus(bookName, tree);
     await renderTreeEditor(bookName, tree);
-    await renderUnassignedEntries(bookName, tree);
+    await renderUnassignedEntries(bookName, tree, bookData);
     updateIngestUI();
 }
 
@@ -337,6 +390,78 @@ function onToolToggle() {
 
     saveSettingsDebounced();
     registerTools();
+}
+
+// ─── Tool Confirmation Toggles ───────────────────────────────────
+
+function onToolConfirmToggle() {
+    const toolName = $(this).data('tool');
+    const settings = getSettings();
+    if (!settings.confirmTools) settings.confirmTools = {};
+    settings.confirmTools[toolName] = $(this).prop('checked');
+    saveSettingsDebounced();
+    registerTools();
+}
+
+// ─── Tool Prompt Overrides ───────────────────────────────────────
+
+function renderToolPromptOverrides() {
+    const $container = $('#tv_tool_prompt_overrides');
+    $container.empty();
+
+    const settings = getSettings();
+    const overrides = settings.toolPromptOverrides || {};
+    const defaults = getDefaultToolDescriptions();
+
+    for (const [toolName, defaultDesc] of Object.entries(defaults)) {
+        const currentValue = overrides[toolName] || defaultDesc;
+        const isModified = !!overrides[toolName] && overrides[toolName] !== defaultDesc;
+        const shortName = toolName.replace('TunnelVision_', '');
+
+        const $block = $(`<div class="tv-tool-prompt-block ${isModified ? 'tv-tool-prompt-modified' : ''}"></div>`);
+        const $header = $('<div class="tv-tool-prompt-header"></div>');
+        $header.append(`<span class="tv-tool-prompt-label">${shortName}</span>`);
+        $header.append(`<button class="tv-tool-prompt-reset" data-tool="${toolName}" title="Reset to default">Reset</button>`);
+        $block.append($header);
+
+        const $textarea = $(`<textarea class="tv-tool-prompt-textarea" data-tool="${toolName}" rows="4"></textarea>`);
+        $textarea.val(currentValue);
+        $block.append($textarea);
+
+        $container.append($block);
+    }
+}
+
+function onToolPromptChange() {
+    const toolName = $(this).data('tool');
+    const value = $(this).val();
+    const settings = getSettings();
+    if (!settings.toolPromptOverrides) settings.toolPromptOverrides = {};
+
+    const defaults = getDefaultToolDescriptions();
+    if (value === defaults[toolName]) {
+        // Value matches default — remove override
+        delete settings.toolPromptOverrides[toolName];
+        $(this).closest('.tv-tool-prompt-block').removeClass('tv-tool-prompt-modified');
+    } else {
+        settings.toolPromptOverrides[toolName] = value;
+        $(this).closest('.tv-tool-prompt-block').addClass('tv-tool-prompt-modified');
+    }
+    saveSettingsDebounced();
+}
+
+function onToolPromptReset() {
+    const toolName = $(this).data('tool');
+    const settings = getSettings();
+    if (settings.toolPromptOverrides) {
+        delete settings.toolPromptOverrides[toolName];
+    }
+    saveSettingsDebounced();
+
+    const defaults = getDefaultToolDescriptions();
+    const $block = $(this).closest('.tv-tool-prompt-block');
+    $block.find('.tv-tool-prompt-textarea').val(defaults[toolName] || '');
+    $block.removeClass('tv-tool-prompt-modified');
 }
 
 function onSearchModeChange() {
@@ -538,7 +663,7 @@ function onStealthModeToggle() {
     const settings = getSettings();
     settings.stealthMode = $(this).prop('checked');
     saveSettingsDebounced();
-    registerTools();
+    void refreshHiddenToolCallMessages({ syncFlags: true });
 }
 
 // ─── Commands Settings ───────────────────────────────────────────
@@ -592,6 +717,13 @@ function onAutoHideSummarizedToggle() {
     saveSettingsDebounced();
 }
 
+function onPassthroughConstantToggle() {
+    const enabled = $(this).prop('checked');
+    const settings = getSettings();
+    settings.passthroughConstant = enabled;
+    saveSettingsDebounced();
+}
+
 // ─── Multi-Book Mode ─────────────────────────────────────────────
 
 function onMultiBookModeChange() {
@@ -605,30 +737,19 @@ function onMultiBookModeChange() {
 // ─── Connection Profile ──────────────────────────────────────────
 
 function onConnectionProfileChange() {
-    const settings = getSettings();
-    settings.connectionProfile = $(this).val() || null;
-    saveSettingsDebounced();
+    setConnectionProfileId($(this).val() || null);
 }
 
 function populateConnectionProfiles() {
     const $select = $('#tv_connection_profile');
-    const currentVal = getSettings().connectionProfile || '';
+    const currentVal = getConnectionProfileId() || '';
 
     // Keep the first option (default)
     $select.find('option:not(:first)').remove();
 
-    // Read profiles from connection-manager extension settings
-    try {
-        const cmSettings = extension_settings?.connectionManager;
-        if (cmSettings?.profiles && Array.isArray(cmSettings.profiles)) {
-            for (const profile of cmSettings.profiles) {
-                if (profile.name) {
-                    $select.append($('<option></option>').val(profile.name).text(profile.name));
-                }
-            }
-        }
-    } catch {
-        // Connection manager may not be loaded
+    for (const profile of listConnectionProfiles().sort((a, b) => (a.name || '').localeCompare(b.name || ''))) {
+        if (!profile?.id || !profile?.name) continue;
+        $select.append($('<option></option>').val(profile.id).text(profile.name));
     }
 
     $select.val(currentVal);
@@ -642,7 +763,7 @@ function populateConnectionProfiles() {
  * @param {string} bookName
  */
 export async function openTreeEditorForBook(bookName) {
-    currentLorebook = bookName;
+    selectCurrentLorebook(bookName);
     await onOpenTreeEditor();
 }
 
@@ -655,11 +776,14 @@ async function onOpenTreeEditor() {
     }
 
     const bookData = await loadWorldInfo(currentLorebook);
+    if (bookData?.entries) {
+        await syncTrackerUidsForLorebook(currentLorebook, bookData.entries);
+    }
     const entryLookup = buildEntryLookup(bookData);
     const bookName = currentLorebook;
 
     // State: which node is selected in the tree
-    let selectedNode = tree.root.children?.[0] || tree.root;
+    let selectedNode = tree.root;
 
     // Build the popup content
     const $popup = $('<div class="tv-popup-editor"></div>');
@@ -706,11 +830,23 @@ async function onOpenTreeEditor() {
         renderMainPanel();
     }
 
+    function isRootNode(node) {
+        return !!node && node.id === tree.root.id;
+    }
+
+    function countActiveEntries(node) {
+        return getAllEntryUids(node).filter(uid => !!entryLookup[uid] && !entryLookup[uid].disable).length;
+    }
+
+    function assignEntryToNode(uid, targetNode) {
+        removeEntryFromTree(tree.root, uid);
+        addEntryToNode(targetNode, uid);
+        saveTree(bookName, tree);
+    }
+
     function renderTreeNodes() {
         $treeScroll.empty();
-        for (const child of (tree.root.children || [])) {
-            $treeScroll.append(buildTreeNode(child, 0));
-        }
+        $treeScroll.append(buildTreeNode(tree.root, 0, { isRoot: true }));
         // Unassigned pseudo-node
         const unassigned = getUnassignedEntries(bookData, tree);
         if (unassigned.length > 0) {
@@ -729,22 +865,24 @@ async function onOpenTreeEditor() {
         }
     }
 
-    function buildTreeNode(node, depth) {
+    function buildTreeNode(node, depth, { isRoot = false } = {}) {
         const $wrapper = $('<div class="tv-tree-node"></div>');
         const hasChildren = (node.children || []).length > 0;
         const isActive = selectedNode?.id === node.id;
-        const count = getAllEntryUids(node).length;
+        const count = countActiveEntries(node);
+        const label = isRoot ? 'Root' : (node.label || 'Unnamed');
 
-        const $row = $(`<div class="tv-tree-row${isActive ? ' active' : ''}"></div>`);
-        const $toggle = $(`<span class="tv-tree-toggle">${hasChildren ? (node._collapsed ? '\u25B6' : '\u25BC') : ''}</span>`);
+        const $row = $(`<div class="tv-tree-row${isActive ? ' active' : ''}${isRoot ? ' tv-tree-row-root' : ''}"></div>`);
+        const $toggle = $(`<span class="tv-tree-toggle">${hasChildren ? (node.collapsed ? '\u25B6' : '\u25BC') : ''}</span>`);
         const $dot = $('<span class="tv-tree-dot"></span>');
-        const $label = $('<span class="tv-tree-label"></span>').text(node.label || 'Unnamed');
+        const $label = $('<span class="tv-tree-label"></span>').text(label);
         const $count = $(`<span class="tv-tree-count">${count}</span>`);
 
         // Click toggle to expand/collapse
         $toggle.on('click', (e) => {
             e.stopPropagation();
-            node._collapsed = !node._collapsed;
+            node.collapsed = !node.collapsed;
+            saveTree(bookName, tree);
             renderTreeNodes();
         });
 
@@ -760,10 +898,9 @@ async function onOpenTreeEditor() {
             const raw = e.originalEvent.dataTransfer.getData('text/plain');
             if (!raw || !/^\d+$/.test(raw)) return;
             const uid = Number(raw);
-            removeEntryFromTree(tree.root, uid);
-            addEntryToNode(node, uid);
-            saveTree(bookName, tree);
+            assignEntryToNode(uid, node);
             selectNode(node);
+            renderUnassignedEntries(bookName, tree, bookData);
             registerTools();
         });
 
@@ -771,7 +908,7 @@ async function onOpenTreeEditor() {
         $wrapper.append($row);
 
         // Children (recursive — no depth limit)
-        if (hasChildren && !node._collapsed) {
+        if (hasChildren && !node.collapsed) {
             const $children = $('<div class="tv-tree-children"></div>');
             for (const child of node.children) {
                 $children.append(buildTreeNode(child, depth + 1));
@@ -783,6 +920,16 @@ async function onOpenTreeEditor() {
     }
 
     function buildBreadcrumb(node) {
+        if (node.id === '__unassigned__') {
+            const $bc = $('<div class="tv-main-breadcrumb"></div>');
+            const $rootCrumb = $('<span class="tv-bc-crumb"></span>').text('Root');
+            $rootCrumb.on('click', () => selectNode(tree.root));
+            $bc.append($rootCrumb);
+            $bc.append($('<span class="tv-bc-sep">\u25B8</span>'));
+            $bc.append($('<span class="tv-bc-current"></span>').text('Unassigned'));
+            return $bc;
+        }
+
         const path = [];
         const findPath = (current, target, trail) => {
             trail.push(current);
@@ -802,7 +949,7 @@ async function onOpenTreeEditor() {
             const label = n === tree.root ? 'Root' : (n.label || 'Unnamed');
             if (i < path.length - 1) {
                 const $crumb = $('<span class="tv-bc-crumb"></span>').text(label);
-                $crumb.on('click', () => selectNode(n === tree.root ? (tree.root.children?.[0] || tree.root) : n));
+                $crumb.on('click', () => selectNode(n));
                 $bc.append($crumb);
             } else {
                 $bc.append($('<span class="tv-bc-current"></span>').text(label));
@@ -817,13 +964,14 @@ async function onOpenTreeEditor() {
         if (!node) return;
 
         const isUnassigned = node.id === '__unassigned__';
+        const isRoot = isRootNode(node);
 
         // Header
         const $header = $('<div class="tv-main-header"></div>');
         $header.append(buildBreadcrumb(node));
 
         const $titleRow = $('<div class="tv-main-title-row"></div>');
-        if (!isUnassigned) {
+        if (!isUnassigned && !isRoot) {
             const $titleInput = $(`<input class="tv-main-title" type="text" />`).val(node.label || 'Unnamed');
             $titleInput.on('change', function () {
                 node.label = $(this).val().trim() || 'Unnamed';
@@ -838,8 +986,8 @@ async function onOpenTreeEditor() {
             $addSub.on('click', () => {
                 node.children = node.children || [];
                 node.children.push(createTreeNode('New Sub-category'));
+                node.collapsed = false;
                 saveTree(bookName, tree);
-                node._collapsed = false;
                 selectNode(node);
                 registerTools();
             });
@@ -848,15 +996,30 @@ async function onOpenTreeEditor() {
                 if (!confirm(`Delete "${node.label}" and unassign its entries?`)) return;
                 removeNode(tree.root, node.id);
                 saveTree(bookName, tree);
-                selectedNode = tree.root.children?.[0] || tree.root;
+                selectedNode = tree.root;
                 renderTreeNodes();
                 renderMainPanel();
+                renderUnassignedEntries(bookName, tree, bookData);
                 registerTools();
             });
             $actions.append($addSub, $delNode);
             $titleRow.append($actions);
         } else {
-            $titleRow.append($('<div class="tv-main-title-static">Unassigned Entries</div>'));
+            $titleRow.append($('<div class="tv-main-title-static"></div>').text(isUnassigned ? 'Unassigned Entries' : 'Root'));
+            if (isRoot) {
+                const $actions = $('<div class="tv-main-title-actions"></div>');
+                const $addSub = $('<button class="tv-popup-btn" title="Add category under root"><i class="fa-solid fa-folder-plus"></i></button>');
+                $addSub.on('click', () => {
+                    tree.root.children = tree.root.children || [];
+                    tree.root.children.push(createTreeNode('New Category'));
+                    tree.root.collapsed = false;
+                    saveTree(bookName, tree);
+                    selectNode(tree.root);
+                    registerTools();
+                });
+                $actions.append($addSub);
+                $titleRow.append($actions);
+            }
         }
         $header.append($titleRow);
         $mainPanel.append($header);
@@ -865,7 +1028,7 @@ async function onOpenTreeEditor() {
         const $body = $('<div class="tv-main-body"></div>');
 
         // Node summary
-        if (node.summary && !isUnassigned) {
+        if (node.summary && !isUnassigned && !isRoot) {
             $body.append($(`<div class="tv-node-summary">
                 <div class="tv-node-summary-label">Node Summary</div>
                 <div class="tv-node-summary-text"></div>
@@ -875,7 +1038,8 @@ async function onOpenTreeEditor() {
         // Direct entries
         const entryUids = node.entryUids || [];
         if (entryUids.length > 0) {
-            $body.append($(`<div class="tv-entry-section-title">Direct Entries <span class="tv-entry-section-count">(${entryUids.length})</span></div>`));
+            const sectionLabel = isRoot ? 'Root Entries' : 'Direct Entries';
+            $body.append($(`<div class="tv-entry-section-title">${sectionLabel} <span class="tv-entry-section-count">(${entryUids.length})</span></div>`));
             const $list = $('<div class="tv-entry-list-rows"></div>');
             for (const uid of entryUids) {
                 const entry = entryLookup[uid];
@@ -890,7 +1054,7 @@ async function onOpenTreeEditor() {
             $body.append($(`<div class="tv-entry-section-title">Sub-categories <span class="tv-entry-section-count">(${children.length})</span></div>`));
             const $cards = $('<div class="tv-child-cards"></div>');
             for (const child of children) {
-                const childCount = getAllEntryUids(child).length;
+                const childCount = countActiveEntries(child);
                 const $card = $('<div class="tv-child-card"></div>');
                 $card.append($('<span class="tv-tree-dot"></span>'));
                 const $info = $('<div class="tv-child-card-info"></div>');
@@ -901,7 +1065,11 @@ async function onOpenTreeEditor() {
                 $card.append($info);
                 $card.append($(`<span class="tv-child-card-count">${childCount}</span>`));
                 $card.append($('<span class="tv-child-card-arrow">\u25B8</span>'));
-                $card.on('click', () => { child._collapsed = false; selectNode(child); });
+                $card.on('click', () => {
+                    child.collapsed = false;
+                    saveTree(bookName, tree);
+                    selectNode(child);
+                });
                 $cards.append($card);
             }
             $body.append($cards);
@@ -918,18 +1086,44 @@ async function onOpenTreeEditor() {
         $row.append($('<span class="tv-entry-name"></span>').text(label));
         $row.append($(`<span class="tv-entry-uid">#${uid}</span>`));
 
+        // Tracker toggle
+        if (entry) {
+            const tracked = isTrackerUid(bookName, uid);
+            const $tracker = $(`<button class="tv-btn-icon tv-entry-tracker ${tracked ? 'is-on' : ''}" title="${tracked ? 'Tracked entry' : 'Track this entry'}"><i class="fa-solid ${tracked ? 'fa-location-crosshairs' : 'fa-location-dot'}"></i></button>`);
+            $tracker.on('click', (e) => {
+                e.stopPropagation();
+                const nextTracked = !$tracker.hasClass('is-on');
+                setTrackerUid(bookName, uid, nextTracked);
+                $tracker.toggleClass('is-on', nextTracked);
+                $tracker.attr('title', nextTracked ? 'Tracked entry' : 'Track this entry');
+                $tracker.find('i').attr('class', `fa-solid ${nextTracked ? 'fa-location-crosshairs' : 'fa-location-dot'}`);
+                registerTools();
+            });
+            $row.append($tracker);
+        }
+
         // Enable/disable toggle
         if (entry) {
             const isDisabled = !!entry.disable;
             const $toggle = $(`<button class="tv-btn-icon tv-entry-toggle ${isDisabled ? 'is-off' : ''}" title="${isDisabled ? 'Enable entry' : 'Disable entry'}"><i class="fa-solid ${isDisabled ? 'fa-eye-slash' : 'fa-eye'}"></i></button>`);
             $toggle.on('click', async (e) => {
                 e.stopPropagation();
+                const wasTracked = isTrackerUid(bookName, uid);
                 entry.disable = !entry.disable;
                 await saveWorldInfo(bookName, bookData, true);
+                if (entry.disable) {
+                    setTrackerUid(bookName, uid, false);
+                } else if (wasTracked || isTrackerTitle(entry.comment)) {
+                    setTrackerUid(bookName, uid, true);
+                }
                 $toggle.toggleClass('is-off', !!entry.disable);
                 $toggle.attr('title', entry.disable ? 'Enable entry' : 'Disable entry');
                 $toggle.find('i').attr('class', `fa-solid ${entry.disable ? 'fa-eye-slash' : 'fa-eye'}`);
                 $row.toggleClass('is-disabled', !!entry.disable);
+                renderTreeNodes();
+                renderMainPanel();
+                await renderUnassignedEntries(bookName, tree, bookData);
+                registerTools();
             });
             $row.append($toggle);
             if (isDisabled) $row.addClass('is-disabled');
@@ -937,12 +1131,13 @@ async function onOpenTreeEditor() {
 
         if (!isUnassigned) {
             const $remove = $('<button class="tv-btn-icon tv-btn-danger-icon tv-entry-remove" title="Remove from node"><i class="fa-solid fa-xmark"></i></button>');
-            $remove.on('click', (e) => {
+            $remove.on('click', async (e) => {
                 e.stopPropagation();
                 node.entryUids = (node.entryUids || []).filter(u => u !== uid);
                 saveTree(bookName, tree);
                 renderMainPanel();
                 renderTreeNodes();
+                await renderUnassignedEntries(bookName, tree, bookData);
                 registerTools();
             });
             $row.append($remove);
@@ -972,7 +1167,7 @@ async function onOpenTreeEditor() {
                 const $expand = $('<div class="tv-entry-expand" style="display:none"></div>');
 
                 // Node summary context
-                if (node.summary && !isUnassigned) {
+                if (node.summary && !isUnassigned && !isRootNode(node)) {
                     $expand.append($(`<div class="tv-expand-node-box">
                         <div class="tv-expand-node-label">Parent node: ${escapeHtml(node.label || 'Unnamed')}</div>
                         <div class="tv-expand-node-text"></div>
@@ -1014,8 +1209,10 @@ async function onOpenTreeEditor() {
     $popup.find('#tv_popup_add_cat').on('click', () => {
         tree.root.children = tree.root.children || [];
         tree.root.children.push(createTreeNode('New Category'));
+        tree.root.collapsed = false;
         saveTree(bookName, tree);
         renderTreeNodes();
+        renderMainPanel();
         registerTools();
     });
 
@@ -1052,6 +1249,10 @@ async function onOpenTreeEditor() {
     $popup.find('#tv_popup_search').on('input', function () {
         const q = $(this).val().toLowerCase().trim();
         $treeScroll.find('.tv-tree-row').each(function () {
+            if ($(this).hasClass('tv-tree-row-root')) {
+                $(this).closest('.tv-tree-node').show();
+                return;
+            }
             const label = $(this).find('.tv-tree-label').text().toLowerCase();
             $(this).closest('.tv-tree-node').toggle(!q || label.includes(q));
         });
@@ -1195,7 +1396,7 @@ function updateTreeStatus(bookName, tree) {
 async function renderTreeEditor(bookName, tree) {
     const $container = $('#tv_tree_editor_container');
 
-    if (!tree || !tree.root || !(tree.root.children || []).length) {
+    if (!tree || !tree.root || ((tree.root.children || []).length === 0 && (tree.root.entryUids || []).length === 0)) {
         $container.hide();
         return;
     }
@@ -1212,7 +1413,16 @@ async function renderTreeEditor(bookName, tree) {
     // Mini-kanban overview in sidebar
     const $overview = $('#tv_mini_kanban_overview');
     $overview.empty();
-    const categories = tree.root.children || [];
+    const categories = [];
+    if ((tree.root.entryUids || []).length > 0) {
+        categories.push({
+            label: 'Root',
+            summary: 'Entries stored directly on the root node.',
+            entryUids: tree.root.entryUids,
+            children: [],
+        });
+    }
+    categories.push(...(tree.root.children || []));
     const colors = ['#e84393', '#f0946c', '#6c5ce7', '#00b894', '#fdcb6e'];
     for (let i = 0; i < categories.length; i++) {
         const cat = categories[i];
@@ -1234,23 +1444,44 @@ async function renderTreeEditor(bookName, tree) {
 
 // ─── Unassigned Entries ──────────────────────────────────────────
 
-async function renderUnassignedEntries(bookName, tree) {
+async function renderUnassignedEntries(bookName, tree, bookData = null) {
     const $container = $('#tv_unassigned_container');
     const $count = $('#tv_unassigned_count');
+    const $list = $('#tv_unassigned_list');
 
     if (!tree || !tree.root) {
+        $list.empty();
         $container.hide();
         return;
     }
 
-    const bookData = await loadWorldInfo(bookName);
-    if (!bookData || !bookData.entries) {
+    const resolvedBookData = bookData || await loadWorldInfo(bookName);
+    if (!resolvedBookData || !resolvedBookData.entries) {
+        $list.empty();
         $container.hide();
         return;
     }
 
-    const unassigned = getUnassignedEntries(bookData, tree);
+    const unassigned = getUnassignedEntries(resolvedBookData, tree);
     $count.text(unassigned.length);
+    $list.empty();
+
+    for (const entry of unassigned) {
+        const label = entry.comment || entry.key?.[0] || `#${entry.uid}`;
+        const $chip = $('<button type="button" class="tv-unassigned-chip"></button>');
+        $chip.append($('<span class="tv-unassigned-chip-label"></span>').text(label));
+        $chip.append($(`<span class="tv-unassigned-chip-uid">#${entry.uid}</span>`));
+        $chip.append($('<span class="tv-unassigned-chip-action"><i class="fa-solid fa-arrow-turn-down"></i> Root</span>'));
+        $chip.on('click', async () => {
+            addEntryToNode(tree.root, entry.uid);
+            saveTree(bookName, tree);
+            toastr.success(`Assigned "${label}" to Root.`, 'TunnelVision');
+            await loadLorebookUI(bookName);
+            populateLorebookDropdown();
+            registerTools();
+        });
+        $list.append($chip);
+    }
 
     if (unassigned.length === 0) {
         $container.hide();

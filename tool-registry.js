@@ -9,7 +9,8 @@ import { ToolManager } from '../../../tool-calling.js';
 import { selected_world_info, world_info, loadWorldInfo, METADATA_KEY } from '../../../world-info.js';
 import { characters, this_chid, chat_metadata } from '../../../../script.js';
 import { getCharaFilename } from '../../../utils.js';
-import { isLorebookEnabled, getSettings, getTree, getBookDescription } from './tree-store.js';
+import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
+import { isLorebookEnabled, getSettings, getTree, getBookDescription, syncTrackerUidsForLorebook } from './tree-store.js';
 
 import { getDefinition as getSearchDef, TOOL_NAME as SEARCH_NAME } from './tools/search.js';
 import { getDefinition as getRememberDef, TOOL_NAME as REMEMBER_NAME } from './tools/remember.js';
@@ -23,8 +24,32 @@ import { getDefinition as getNotebookDef, TOOL_NAME as NOTEBOOK_NAME } from './t
 /** All tool names for bulk unregister. */
 const ALL_TOOL_NAMES = [SEARCH_NAME, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, REORGANIZE_NAME, SUMMARIZE_NAME, MERGESPLIT_NAME, NOTEBOOK_NAME];
 
+/** Tools that can be gated with per-tool confirmation. Only destructive/mutating tools. */
+const CONFIRMABLE_TOOLS = new Set([REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME]);
+
 /** Cached tracker list string — refreshed on each registerTools() call. */
 let _trackerListCache = '';
+
+function getAllToolDefinitions() {
+    return [
+        { def: getSearchDef(), name: SEARCH_NAME },
+        { def: getRememberDef(), name: REMEMBER_NAME },
+        { def: getUpdateDef(), name: UPDATE_NAME },
+        { def: getForgetDef(), name: FORGET_NAME },
+        { def: getReorganizeDef(), name: REORGANIZE_NAME },
+        { def: getSummarizeDef(), name: SUMMARIZE_NAME },
+        { def: getMergeSplitDef(), name: MERGESPLIT_NAME },
+        { def: getNotebookDef(), name: NOTEBOOK_NAME },
+    ];
+}
+
+function getToolDefinitionName(tool) {
+    return tool?.toFunctionOpenAI?.()?.function?.name || '';
+}
+
+function getRegisteredTunnelVisionTools() {
+    return ToolManager.tools.filter(tool => ALL_TOOL_NAMES.includes(getToolDefinitionName(tool)));
+}
 
 /** Get cached tracker list string. Updated during registerTools(). */
 export function getTrackerListString() {
@@ -37,17 +62,14 @@ export function getTrackerListString() {
  * @returns {Promise<string>}
  */
 async function getTrackerList() {
-    const settings = getSettings();
-    const trackerUids = settings.trackerUids || {};
     const trackerNames = [];
 
     for (const bookName of getActiveTunnelVisionBooks()) {
-        const bookTrackers = trackerUids[bookName];
-        if (!bookTrackers || !Array.isArray(bookTrackers) || bookTrackers.length === 0) continue;
-
         try {
             const bookData = await loadWorldInfo(bookName);
             if (!bookData?.entries) continue;
+            const bookTrackers = await syncTrackerUidsForLorebook(bookName, bookData.entries);
+            if (!bookTrackers.length) continue;
 
             for (const key of Object.keys(bookData.entries)) {
                 const entry = bookData.entries[key];
@@ -107,6 +129,106 @@ export function getActiveTunnelVisionBooks() {
         if (isLorebookEnabled(bookName)) active.push(bookName);
     }
     return active;
+}
+
+export async function inspectToolRuntimeState() {
+    const settings = getSettings();
+    const disabled = settings.disabledTools || {};
+    const activeBooks = getActiveTunnelVisionBooks();
+    const disabledToolNames = ALL_TOOL_NAMES.filter(name => disabled[name]);
+    const expectedToolNames = ALL_TOOL_NAMES.filter(name => !disabled[name]);
+    const registeredTools = getRegisteredTunnelVisionTools();
+    const registeredToolNames = registeredTools.map(getToolDefinitionName);
+    const missingToolNames = expectedToolNames.filter(name => !registeredToolNames.includes(name));
+    const stealthToolNames = registeredTools
+        .filter(tool => tool.stealth)
+        .map(getToolDefinitionName);
+    const eligibleToolNames = [];
+    const eligibilityErrors = [];
+
+    for (const tool of registeredTools) {
+        const name = getToolDefinitionName(tool);
+        try {
+            if (await tool.shouldRegister()) {
+                eligibleToolNames.push(name);
+            }
+        } catch (error) {
+            eligibilityErrors.push(`${name}: ${error?.message || String(error)}`);
+        }
+    }
+
+    return {
+        activeBooks,
+        disabledToolNames,
+        expectedToolNames,
+        registeredToolNames,
+        missingToolNames,
+        stealthToolNames,
+        eligibleToolNames,
+        eligibilityErrors,
+    };
+}
+
+function logToolRuntimeSnapshot(snapshot, reason = 'runtime') {
+    const parts = [
+        `active=[${snapshot.activeBooks.join(', ') || '(none)'}]`,
+        `registered=[${snapshot.registeredToolNames.join(', ') || '(none)'}]`,
+        `missing=[${snapshot.missingToolNames.join(', ') || '(none)'}]`,
+        `stealth=[${snapshot.stealthToolNames.join(', ') || '(none)'}]`,
+        `eligible=[${snapshot.eligibleToolNames.join(', ') || '(none)'}]`,
+        `repaired=${snapshot.repairApplied ? 'yes' : 'no'}`,
+    ];
+
+    if (snapshot.eligibilityErrors?.length) {
+        parts.push(`eligibilityErrors=[${snapshot.eligibilityErrors.join('; ')}]`);
+    }
+
+    const message = `[TunnelVision] Tool preflight (${reason}) ${parts.join(' | ')}`;
+    if (snapshot.failureReasons?.length) {
+        console.warn(`${message} | failures=[${snapshot.failureReasons.join('; ')}]`);
+    } else {
+        console.log(message);
+    }
+}
+
+export async function preflightToolRuntimeState({ repair = true, reason = 'generation', log = true } = {}) {
+    let snapshot = await inspectToolRuntimeState();
+    let repairApplied = false;
+
+    if (
+        repair
+        && snapshot.activeBooks.length > 0
+        && (snapshot.missingToolNames.length > 0 || snapshot.stealthToolNames.length > 0)
+    ) {
+        await registerTools();
+        repairApplied = true;
+        snapshot = await inspectToolRuntimeState();
+    }
+
+    const failureReasons = [];
+    if (snapshot.activeBooks.length > 0 && snapshot.expectedToolNames.length > 0) {
+        if (snapshot.registeredToolNames.length === 0) {
+            failureReasons.push('no_registered_tools');
+        }
+        if (snapshot.missingToolNames.length > 0) {
+            failureReasons.push(`missing_tools:${snapshot.missingToolNames.join(', ')}`);
+        }
+        if (snapshot.stealthToolNames.length > 0) {
+            failureReasons.push(`stealth_tools:${snapshot.stealthToolNames.join(', ')}`);
+        }
+        if (snapshot.eligibilityErrors.length > 0) {
+            failureReasons.push(`eligibility_errors:${snapshot.eligibilityErrors.join(' | ')}`);
+        }
+        if (snapshot.eligibleToolNames.length === 0) {
+            failureReasons.push('no_eligible_tools');
+        }
+    }
+
+    const result = { ...snapshot, repairApplied, failureReasons };
+    if (log) {
+        logToolRuntimeSnapshot(result, reason);
+    }
+    return result;
 }
 
 /**
@@ -176,14 +298,88 @@ export function getBookListWithDescriptions() {
 }
 
 /**
+ * Returns the default (built-in) description for every tool.
+ * Used by the UI to show defaults and allow reset.
+ * @returns {{ [toolName: string]: string }}
+ */
+export function getDefaultToolDescriptions() {
+    const result = {};
+    for (const { def, name } of getAllToolDefinitions()) {
+        if (def) {
+            result[name] = def.description;
+        }
+    }
+    return result;
+}
+
+/**
+ * Format args object into readable HTML for the confirmation popup.
+ * @param {Object} args
+ * @returns {string}
+ */
+function escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatConfirmArgs(args) {
+    if (!args || typeof args !== 'object') return '';
+    const lines = [];
+    for (const [key, value] of Object.entries(args)) {
+        let display;
+        if (Array.isArray(value)) {
+            display = escapeHtml(value.join(', '));
+        } else if (typeof value === 'string' && value.length > 200) {
+            display = escapeHtml(value.substring(0, 200)) + '...';
+        } else {
+            display = escapeHtml(value ?? '');
+        }
+        lines.push(`<div><strong>${escapeHtml(key)}:</strong> ${display}</div>`);
+    }
+    return lines.join('');
+}
+
+/**
+ * Show a confirmation popup for a tool action.
+ * @param {string} displayName - Human-readable tool name
+ * @param {Object} args - Tool arguments from the AI
+ * @returns {Promise<boolean>} True if user approved
+ */
+async function showToolConfirmation(displayName, args) {
+    const html = `<div class="tv-confirm-popup">
+    <div class="tv-confirm-title">TunnelVision wants to: <strong>${displayName}</strong></div>
+    <div class="tv-confirm-args">${formatConfirmArgs(args)}</div>
+    <div class="tv-confirm-hint">Approve this action?</div>
+</div>`;
+    const result = await callGenericPopup(html, POPUP_TYPE.CONFIRM);
+    return result === POPUP_RESULT.AFFIRMATIVE;
+}
+
+/**
+ * Wrap a tool's action with a confirmation gate.
+ * @param {Function} originalAction - The tool's original action function
+ * @param {string} displayName - Human-readable tool name
+ * @returns {Function} Wrapped action that shows confirmation first
+ */
+function wrapWithConfirmation(originalAction, displayName) {
+    return async function (args) {
+        const approved = await showToolConfirmation(displayName, args);
+        if (!approved) {
+            return 'Action denied by user. The user chose not to allow this operation. Try a different approach or ask the user what they want.';
+        }
+        return originalAction(args);
+    };
+}
+
+/**
  * Register all TunnelVision tools with ToolManager.
  * Each tool's getDefinition() may return null if preconditions aren't met
  * (e.g. Search returns null if no valid trees exist).
  */
 export async function registerTools() {
+    unregisterTools();
+
     const activeBooks = getActiveTunnelVisionBooks();
     if (activeBooks.length === 0) {
-        unregisterTools();
         _trackerListCache = '';
         return;
     }
@@ -194,24 +390,14 @@ export async function registerTools() {
     const settings = getSettings();
     const disabled = settings.disabledTools || {};
 
-    const allDefs = [
-        { def: getSearchDef(), name: SEARCH_NAME },
-        { def: getRememberDef(), name: REMEMBER_NAME },
-        { def: getUpdateDef(), name: UPDATE_NAME },
-        { def: getForgetDef(), name: FORGET_NAME },
-        { def: getReorganizeDef(), name: REORGANIZE_NAME },
-        { def: getSummarizeDef(), name: SUMMARIZE_NAME },
-        { def: getMergeSplitDef(), name: MERGESPLIT_NAME },
-        { def: getNotebookDef(), name: NOTEBOOK_NAME },
-    ];
+    const allDefs = getAllToolDefinitions();
 
-    const stealthMode = settings.stealthMode === true;
+    const confirmTools = settings.confirmTools || {};
+    const promptOverrides = settings.toolPromptOverrides || {};
 
     let registered = 0;
     for (const { def, name } of allDefs) {
         if (disabled[name]) {
-            // Unregister if it was previously registered
-            try { ToolManager.unregisterFunctionTool(name); } catch { /* noop */ }
             continue;
         }
         if (!def) continue;
@@ -219,14 +405,19 @@ export async function registerTools() {
         // Clone def to avoid mutating the original
         let registrationDef = { ...def };
 
-        // Inject tracker list into Search and Update descriptions
-        if (_trackerListCache && (name === SEARCH_NAME || name === UPDATE_NAME)) {
-            registrationDef.description = def.description + _trackerListCache;
+        // Apply user prompt override (description only)
+        if (promptOverrides[name] && typeof promptOverrides[name] === 'string') {
+            registrationDef.description = promptOverrides[name];
         }
 
-        // Apply global stealth mode override (forces all tools to stealth)
-        if (stealthMode) {
-            registrationDef.stealth = true;
+        // Inject tracker list into Search and Update descriptions
+        if (_trackerListCache && (name === SEARCH_NAME || name === UPDATE_NAME)) {
+            registrationDef.description = registrationDef.description + _trackerListCache;
+        }
+
+        // Wrap action with confirmation gate for confirmable tools
+        if (CONFIRMABLE_TOOLS.has(name) && confirmTools[name]) {
+            registrationDef.action = wrapWithConfirmation(registrationDef.action, registrationDef.displayName || name);
         }
 
         try {
@@ -238,7 +429,9 @@ export async function registerTools() {
     }
 
     const eligible = allDefs.filter(({ def, name }) => def && !disabled[name]).length;
+    const snapshot = await inspectToolRuntimeState();
     console.log(`[TunnelVision] Registered ${registered}/${eligible} tools for ${activeBooks.length} lorebook(s)`);
+    logToolRuntimeSnapshot({ ...snapshot, repairApplied: false, failureReasons: [] }, 'register');
 }
 
 /**
@@ -254,5 +447,5 @@ export function unregisterTools() {
     }
 }
 
-// Re-export tool names for diagnostics
-export { SEARCH_NAME, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, REORGANIZE_NAME, SUMMARIZE_NAME, MERGESPLIT_NAME, NOTEBOOK_NAME, ALL_TOOL_NAMES };
+// Re-export tool names and constants for diagnostics/UI
+export { SEARCH_NAME, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, REORGANIZE_NAME, SUMMARIZE_NAME, MERGESPLIT_NAME, NOTEBOOK_NAME, ALL_TOOL_NAMES, CONFIRMABLE_TOOLS };

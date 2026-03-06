@@ -15,6 +15,7 @@
 import { getTree, findNodeById, createTreeNode, saveTree, getSettings } from '../tree-store.js';
 import { createEntry } from '../entry-manager.js';
 import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
+import { markAutoSummaryComplete } from '../auto-summary.js';
 import { getContext } from '../../../../st-context.js';
 import { hideChatMessageRange } from '../../../../chats.js';
 
@@ -253,6 +254,7 @@ When you notice related events forming a pattern or storyline, group them into "
                     keys,
                     nodeId: targetNodeId,
                 });
+                markAutoSummaryComplete();
                 let response = `Summarized: "${args.title}" (UID ${result.uid}) → "${result.nodeLabel}" in "${lorebook}". Significance: ${significance}.`;
                 if (arcLabel) {
                     response += ` Arc: "${arcLabel}".`;

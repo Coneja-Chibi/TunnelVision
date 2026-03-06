@@ -22,7 +22,7 @@ import { eventSource, event_types, extension_prompt_types, setExtensionPrompt } 
 import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
 import { getSettings, isLorebookEnabled } from './tree-store.js';
-import { registerTools } from './tool-registry.js';
+import { preflightToolRuntimeState, registerTools } from './tool-registry.js';
 import { buildNotebookPrompt } from './tools/notebook.js';
 import { bindUIEvents, refreshUI } from './ui-controller.js';
 import { initActivityFeed } from './activity-feed.js';
@@ -65,12 +65,15 @@ async function init() {
     const settings = getSettings();
     applyRecurseLimit(settings);
     if (settings.globalEnabled !== false) {
-        registerTools();
+        await registerTools();
     }
 
     // Listen for relevant events
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     eventSource.on(event_types.WORLDINFO_UPDATED, onWorldInfoUpdated);
+    if (event_types.WORLDINFO_SETTINGS_UPDATED) {
+        eventSource.on(event_types.WORLDINFO_SETTINGS_UPDATED, onWorldInfoUpdated);
+    }
     eventSource.on(event_types.APP_READY, onAppReady);
 
     // Suppress normal WI keyword scanning for TV-managed lorebooks
@@ -89,18 +92,18 @@ async function init() {
     console.log('[TunnelVision] Extension loaded');
 }
 
-function onChatChanged() {
+async function onChatChanged() {
     refreshUI();
-    registerTools();
+    await registerTools();
 }
 
-function onWorldInfoUpdated() {
+async function onWorldInfoUpdated() {
     refreshUI();
-    registerTools();
+    await registerTools();
 }
 
-function onAppReady() {
-    registerTools();
+async function onAppReady() {
+    await registerTools();
 }
 
 /**
@@ -113,10 +116,17 @@ function onWorldInfoEntriesLoaded(data) {
     const settings = getSettings();
     if (settings.globalEnabled === false) return;
 
+    const passthrough = settings.passthroughConstant !== false;
     let removed = 0;
+    let passed = 0;
     const filterTvEntries = (arr) => {
         for (let i = arr.length - 1; i >= 0; i--) {
             if (arr[i].world && isLorebookEnabled(arr[i].world)) {
+                // Let constant (always-active) entries through if the toggle is on
+                if (passthrough && arr[i].constant) {
+                    passed++;
+                    continue;
+                }
                 arr.splice(i, 1);
                 removed++;
             }
@@ -128,8 +138,8 @@ function onWorldInfoEntriesLoaded(data) {
     filterTvEntries(data.chatLore);
     filterTvEntries(data.personaLore);
 
-    if (removed > 0) {
-        console.log(`[TunnelVision] Suppressed ${removed} TV-managed entries from normal WI scanning`);
+    if (removed > 0 || passed > 0) {
+        console.log(`[TunnelVision] Suppressed ${removed} TV-managed entries from normal WI scanning` + (passed > 0 ? `, passed through ${passed} constant entries` : ''));
     }
 }
 
@@ -138,16 +148,38 @@ const TV_NOTEBOOK_KEY = 'tunnelvision_notebook';
 
 /**
  * Inject or clear the mandatory tool call system prompt before each generation.
+ * Runs before ST assembles the next request, so it can validate TV tool state first.
  */
-function onGenerationStarted() {
+async function onGenerationStarted() {
     const settings = getSettings();
+    let runtimeState = null;
+
+    if (settings.globalEnabled !== false) {
+        runtimeState = await preflightToolRuntimeState({ repair: true, reason: 'generation', log: true });
+    }
 
     // Mandatory tool call instruction
-    if (settings.globalEnabled !== false && settings.mandatoryTools) {
+    if (
+        settings.globalEnabled !== false
+        && settings.mandatoryTools
+        && runtimeState?.activeBooks?.length > 0
+        && runtimeState.expectedToolNames.length > 0
+        && runtimeState.eligibleToolNames.length > 0
+    ) {
         const prompt = `[IMPORTANT INSTRUCTION: You MUST use at least one TunnelVision tool call this turn. Before responding to the user, search the lorebook for relevant context using TunnelVision_Search. If important new information emerged in the conversation, also use TunnelVision_Remember to save it. Do NOT skip tool calls — they are mandatory every generation.]`;
         setExtensionPrompt(TV_PROMPT_KEY, prompt, extension_prompt_types.IN_PROMPT, 0);
     } else {
         setExtensionPrompt(TV_PROMPT_KEY, '', extension_prompt_types.IN_PROMPT, 0);
+        if (
+            settings.globalEnabled !== false
+            && settings.mandatoryTools
+            && runtimeState
+            && runtimeState.activeBooks.length > 0
+            && runtimeState.expectedToolNames.length > 0
+            && runtimeState.eligibleToolNames.length === 0
+        ) {
+            console.warn('[TunnelVision] Mandatory tools enabled, but no eligible TunnelVision tools are available for this generation.');
+        }
     }
 
     // Inject notebook contents every turn (if enabled and notes exist)

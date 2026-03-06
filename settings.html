@@ -246,15 +246,15 @@
 
                         <hr class="tv-adv-divider" />
 
-                        <!-- ═══ Stealth Mode ═══ -->
+                        <!-- ═══ Hide Tool-Call Messages ═══ -->
                         <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Stealth Mode</div>
+                            <div class="tv-adv-section-title">Hide Tool-Call Messages</div>
                             <div class="tv-help-text" style="margin-bottom: 8px;">
-                                When enabled, all TunnelVision tool calls are hidden from the chat output. The AI still uses them normally, but you won't see the tool call messages in the conversation. Useful for a cleaner chat experience.
+                                When enabled, TunnelVision tool-call messages are visually hidden in the chat. The AI still uses them normally, but the messages won't appear in the conversation. Useful for a cleaner chat experience.
                             </div>
                             <label class="tv-checkbox-row">
                                 <input id="tv_stealth_mode" type="checkbox" />
-                                <span>Hide all tool calls from chat</span>
+                                <span>Hide tool-call messages in chat</span>
                             </label>
                         </div>
 
@@ -392,6 +392,55 @@
 
                         <hr class="tv-adv-divider" />
 
+                        <!-- ═══ Tool Confirmation ═══ -->
+                        <div class="tv-adv-section">
+                            <div class="tv-adv-section-title">Tool Confirmation</div>
+                            <div class="tv-help-text" style="margin-bottom: 8px;">
+                                Require your approval before the AI can execute these tools. When enabled, a popup will show what the AI wants to do and wait for you to approve or deny.
+                            </div>
+                            <div class="tv-tool-confirm-toggles">
+                                <label class="tv-checkbox-row">
+                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Remember" />
+                                    <span>Remember — creating new entries</span>
+                                </label>
+                                <label class="tv-checkbox-row">
+                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Update" />
+                                    <span>Update — modifying existing entries</span>
+                                </label>
+                                <label class="tv-checkbox-row">
+                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Forget" />
+                                    <span>Forget — disabling/deleting entries</span>
+                                </label>
+                                <label class="tv-checkbox-row">
+                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Summarize" />
+                                    <span>Summarize — creating scene summaries</span>
+                                </label>
+                                <label class="tv-checkbox-row">
+                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Reorganize" />
+                                    <span>Reorganize — moving entries between categories</span>
+                                </label>
+                                <label class="tv-checkbox-row">
+                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_MergeSplit" />
+                                    <span>Merge/Split — combining or splitting entries</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <hr class="tv-adv-divider" />
+
+                        <!-- ═══ Tool Prompt Overrides ═══ -->
+                        <div class="tv-adv-section">
+                            <div class="tv-adv-section-title">Tool Prompt Overrides</div>
+                            <div class="tv-help-text" style="margin-bottom: 8px;">
+                                Customize the instructions the AI sees for each tool. This controls <em>when</em> and <em>how</em> the AI decides to use each tool. Only the description text is editable — the tool's parameters and behavior cannot be changed. Leave empty to use the default prompt.
+                            </div>
+                            <div id="tv_tool_prompt_overrides" class="tv-tool-prompt-overrides">
+                                <!-- Rendered by JS -->
+                            </div>
+                        </div>
+
+                        <hr class="tv-adv-divider" />
+
                         <!-- ═══ !Commands ═══ -->
                         <div class="tv-adv-section">
                             <div class="tv-adv-section-title">User Commands</div>
@@ -445,6 +494,24 @@
                             </label>
                             <div class="tv-help-text" style="margin-top: 4px;">
                                 When enabled, messages covered by a summary are hidden from chat to save tokens. Hidden messages can be restored with /unhide.
+                            </div>
+                        </div>
+
+                        <hr class="tv-adv-divider" />
+
+                        <!-- ═══ Constant Entry Passthrough ═══ -->
+                        <div class="tv-adv-section">
+                            <div class="tv-adv-section-title">Constant Entry Passthrough</div>
+                            <div class="tv-help-text" style="margin-bottom: 8px;">
+                                Lorebook entries marked as "Constant" (always active) are normally suppressed along with all other TV-managed entries. Enable this to let constant entries pass through ST's normal injection pipeline, so they're always included in context regardless of tree search.
+                            </div>
+                            <label class="tv-toggle">
+                                <input id="tv_passthrough_constant" type="checkbox" checked />
+                                <span class="tv-toggle-slider"></span>
+                                <span class="tv-toggle-label">Let constant entries bypass TunnelVision gating</span>
+                            </label>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                Useful for chat summaries, system rules, or other entries that should <em>always</em> be in context. These entries will still appear in the tree but won't depend on tool calls for injection.
                             </div>
                         </div>
 

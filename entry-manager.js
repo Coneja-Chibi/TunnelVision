@@ -21,8 +21,10 @@ import {
     findNodeById,
     addEntryToNode,
     removeEntryFromTree,
-    getAllEntryUids,
     createTreeNode,
+    isTrackerTitle,
+    isTrackerUid,
+    setTrackerUid,
 } from './tree-store.js';
 
 /**
@@ -86,6 +88,10 @@ export async function createEntry(bookName, { content, comment, keys, nodeId }) 
         nodeLabel = '(no tree)';
     }
 
+    if (isTrackerTitle(newEntry.comment)) {
+        setTrackerUid(bookName, newEntry.uid, true);
+    }
+
     console.log(`[TunnelVision] Created entry "${comment}" (UID ${newEntry.uid}) in "${bookName}" → ${nodeLabel}`);
     return { uid: newEntry.uid, comment: newEntry.comment, nodeLabel };
 }
@@ -131,6 +137,11 @@ export async function updateEntry(bookName, uid, updates) {
     }
 
     await saveWorldInfo(bookName, bookData, true);
+    if (entry.disable) {
+        setTrackerUid(bookName, uid, false);
+    } else if (isTrackerTitle(entry.comment) || isTrackerUid(bookName, uid)) {
+        setTrackerUid(bookName, uid, true);
+    }
 
     console.log(`[TunnelVision] Updated entry "${entry.comment}" (UID ${uid}) in "${bookName}": ${changed.join(', ')}`);
     return { uid, comment: entry.comment, updated: changed };
@@ -179,6 +190,7 @@ export async function forgetEntry(bookName, uid, hardDelete = false) {
         removeEntryFromTree(tree.root, uid);
         saveTree(bookName, tree);
     }
+    setTrackerUid(bookName, uid, false);
 
     console.log(`[TunnelVision] ${action} entry "${comment}" (UID ${uid}) in "${bookName}"`);
     return { uid, comment, action };
@@ -361,6 +373,13 @@ export async function mergeEntries(bookName, keepUid, removeUid, opts = {}) {
         saveTree(bookName, tree);
     }
 
+    const shouldTrackMergedEntry =
+        isTrackerUid(bookName, keepUid) ||
+        isTrackerUid(bookName, removeUid) ||
+        isTrackerTitle(keepEntry.comment);
+    setTrackerUid(bookName, keepUid, shouldTrackMergedEntry);
+    setTrackerUid(bookName, removeUid, false);
+
     console.log(`[TunnelVision] Merged entry UID ${removeUid} ("${removedComment}") into UID ${keepUid} ("${keepEntry.comment}") in "${bookName}"`);
     return { uid: keepUid, comment: keepEntry.comment, removedUid: removeUid, removedComment };
 }
@@ -398,6 +417,7 @@ export async function splitEntry(bookName, uid, { keepContent, keepTitle, newCon
     if (!original) {
         throw new Error(`Entry UID ${uid} not found in lorebook "${bookName}".`);
     }
+    const wasTracker = isTrackerUid(bookName, uid) || isTrackerTitle(original.comment);
 
     // Update the original entry
     original.content = keepContent.trim();
@@ -422,6 +442,10 @@ export async function splitEntry(bookName, uid, { keepContent, keepTitle, newCon
         keys: newKeys || [],
         nodeId,
     });
+    if (wasTracker) {
+        setTrackerUid(bookName, uid, true);
+        setTrackerUid(bookName, newResult.uid, true);
+    }
 
     console.log(`[TunnelVision] Split entry UID ${uid} → kept "${original.comment}", created UID ${newResult.uid} "${newResult.comment}" in "${bookName}"`);
     return {

@@ -305,7 +305,7 @@ function formatCollapsedNode(node, depth, isRoot = false) {
  * @param {string} nodeId
  * @returns {Promise<string>}
  */
-async function resolveNodeEntries(nodeId) {
+async function resolveNodeEntries(nodeId, seenEntries = new Set()) {
     const results = [];
 
     // Document-level node: resolve all entries from that specific lorebook
@@ -318,10 +318,7 @@ async function resolveNodeEntries(nodeId) {
         const bookData = await loadWorldInfo(bookName);
         if (!bookData || !bookData.entries) return '';
         const uidMap = buildUidMap(bookData.entries);
-        for (const uid of uids) {
-            const entry = uidMap.get(uid);
-            if (entry?.content) results.push(entry.content);
-        }
+        pushResolvedEntries(results, seenEntries, bookName, uidMap, uids);
         return results.join('\n\n');
     }
 
@@ -339,13 +336,23 @@ async function resolveNodeEntries(nodeId) {
         if (!bookData || !bookData.entries) continue;
 
         const uidMap = buildUidMap(bookData.entries);
-        for (const uid of uids) {
-            const entry = uidMap.get(uid);
-            if (entry?.content) results.push(entry.content);
-        }
+        pushResolvedEntries(results, seenEntries, bookName, uidMap, uids);
     }
 
     return results.join('\n\n');
+}
+
+function pushResolvedEntries(results, seenEntries, bookName, uidMap, uids) {
+    for (const uid of uids) {
+        const entry = uidMap.get(uid);
+        if (!entry?.content || entry.disable) continue;
+
+        const key = `${bookName}:${uid}`;
+        if (seenEntries.has(key)) continue;
+        seenEntries.add(key);
+        const title = entry.comment || entry.key?.[0] || `Entry #${uid}`;
+        results.push(`[Lorebook: ${bookName} | UID: ${uid} | Title: ${title}]\n${entry.content}`);
+    }
 }
 
 /**

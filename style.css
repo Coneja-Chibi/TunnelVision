@@ -1923,3 +1923,117 @@
     color: var(--SmartThemeQuoteColor, #888);
     flex-shrink: 0;
 }
+
+/* ===== Root Node in Tree Editor ===== */
+.tv-tree-row-root {
+    font-weight: 600;
+    color: var(--SmartThemeEmColor);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 4px;
+    padding-bottom: 6px;
+}
+
+.tv-tree-row-root .tv-tree-dot {
+    background: var(--SmartThemeQuoteColor, #888);
+    width: 8px;
+    height: 8px;
+}
+
+/* ===== Tracker Toggle on Entry Rows ===== */
+.tv-entry-tracker {
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--SmartThemeQuoteColor, #888);
+}
+
+.tv-entry-tracker:hover {
+    color: #e84393;
+    background: rgba(232, 67, 147, 0.1);
+}
+
+.tv-entry-tracker.is-on {
+    opacity: 0.8;
+    color: #e84393;
+}
+
+.tv-entry-row:hover .tv-entry-tracker {
+    opacity: 1;
+}
+
+/* ===== Unassigned Entry Chips ===== */
+.tv-unassigned-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: rgba(253, 203, 110, 0.08);
+    border: 1px solid rgba(253, 203, 110, 0.2);
+    cursor: pointer;
+    font-size: 11px;
+    transition: all 0.12s ease;
+    color: var(--SmartThemeBodyColor);
+}
+
+.tv-unassigned-chip:hover {
+    background: rgba(253, 203, 110, 0.15);
+    border-color: rgba(253, 203, 110, 0.4);
+}
+
+.tv-unassigned-chip-uid {
+    font-size: 9px;
+    font-family: monospace;
+    color: var(--SmartThemeQuoteColor, #888);
+}
+
+.tv-unassigned-chip-action {
+    font-size: 9px;
+    color: var(--SmartThemeQuoteColor, #888);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* ===== Feed Entry Items (TunnelVision retrieved entries) ===== */
+.tv-float-item-entry-tv {
+    border-left: 2px solid rgba(240, 148, 108, 0.4);
+}
+
+.tv-float-entry-tag {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(240, 148, 108, 0.1);
+    color: rgba(240, 148, 108, 0.8);
+    border: 1px solid rgba(240, 148, 108, 0.15);
+}
+
+/* ===== Hidden Tool Call Messages ===== */
+.tv-hidden-tool-call {
+    display: none !important;
+}
+
+/* ===== Confirmation Popup ===== */
+.tv-confirm-popup { padding: 8px 0; }
+.tv-confirm-title { font-size: 14px; margin-bottom: 10px; }
+.tv-confirm-args { background: rgba(0,0,0,0.15); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 12px; max-height: 300px; overflow-y: auto; }
+.tv-confirm-args > div { margin-bottom: 4px; word-break: break-word; }
+.tv-confirm-hint { font-size: 11px; opacity: 0.6; }
+
+/* ===== Tool Prompt Overrides ===== */
+.tv-tool-prompt-overrides { display: flex; flex-direction: column; gap: 12px; }
+.tv-tool-prompt-block { background: rgba(0,0,0,0.08); border-radius: 6px; padding: 10px 12px; }
+.tv-tool-prompt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.tv-tool-prompt-label { font-weight: 600; font-size: 12px; }
+.tv-tool-prompt-reset { font-size: 10px; opacity: 0.6; cursor: pointer; background: none; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 2px 8px; color: inherit; }
+.tv-tool-prompt-reset:hover { opacity: 1; }
+.tv-tool-prompt-textarea { width: 100%; min-height: 80px; resize: vertical; font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 8px; color: inherit; line-height: 1.4; }
+.tv-tool-prompt-textarea:focus { border-color: rgba(255,255,255,0.25); outline: none; }
+.tv-tool-prompt-modified { border-left: 3px solid var(--SmartThemeQuoteColor, #e8a66d); }

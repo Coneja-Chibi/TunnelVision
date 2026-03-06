@@ -4,15 +4,17 @@
  * Lives on document.body as a draggable trigger button + expandable panel.
  */
 
-import { eventSource, event_types } from '../../../../script.js';
+import { chat, eventSource, event_types, saveChatConditional } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 import { ALL_TOOL_NAMES, getActiveTunnelVisionBooks } from './tool-registry.js';
 import { getSettings, isLorebookEnabled, getTree } from './tree-store.js';
 import { openTreeEditorForBook } from './ui-controller.js';
 
 const MAX_FEED_ITEMS = 50;
+const MAX_RENDERED_RETRIEVED_ENTRIES = 5;
 const STORAGE_KEY_POS = 'tv-feed-trigger-position';
 const METADATA_KEY = 'tunnelvision_feed';
+const HIDDEN_TOOL_CALL_FLAG = 'tvHiddenToolCalls';
 
 /** Track which chatId the current feedItems belong to, prevents cross-chat bleed. */
 let activeChatId = null;
@@ -21,10 +23,36 @@ let activeChatId = null;
 /** @type {Array<{name: string, verb: string, summary: string}>} */
 let turnToolCalls = [];
 
-/** @type {Array<{id: number, type: string, icon: string, verb: string, color: string, summary: string, timestamp: number, keys?: string[], uid?: number}>} */
+/**
+ * @typedef {Object} RetrievedEntry
+ * @property {string} lorebook
+ * @property {number|null} uid
+ * @property {string} title
+ */
+
+/**
+ * @typedef {Object} FeedItem
+ * @property {number} id
+ * @property {'entry'|'tool'} type
+ * @property {string} icon
+ * @property {string} verb
+ * @property {string} color
+ * @property {string} [summary]
+ * @property {number} timestamp
+ * @property {'native'|'tunnelvision'} [source]
+ * @property {string} [lorebook]
+ * @property {number|null} [uid]
+ * @property {string} [title]
+ * @property {string[]} [keys]
+ * @property {RetrievedEntry[]} [retrievedEntries]
+ */
+
+/** @type {FeedItem[]} */
 let feedItems = [];
 let nextId = 0;
 let feedInitialized = false;
+let hiddenToolCallRefreshTimer = null;
+let hiddenToolCallRefreshNeedsSync = false;
 
 /** @type {HTMLElement|null} */
 let triggerEl = null;
@@ -67,27 +95,31 @@ export function initActivityFeed() {
         eventSource.on(event_types.TOOL_CALLS_PERFORMED, onToolCallsPerformed);
     }
 
+    // Listen for tool call rendering to apply visual hiding
+    if (event_types.TOOL_CALLS_RENDERED) {
+        eventSource.on(event_types.TOOL_CALLS_RENDERED, onToolCallsRendered);
+    }
+
     // Reload feed from chat metadata on chat switch
     if (event_types.CHAT_CHANGED) {
         eventSource.on(event_types.CHAT_CHANGED, () => {
             loadFeed();
             if (panelEl?.classList.contains('open')) renderAllItems();
+            queueHiddenToolCallRefresh(false);
         });
     }
 
-    // Reset feed and console accumulator each turn
+    // Reset turn accumulator each generation
     if (event_types.GENERATION_STARTED) {
         eventSource.on(event_types.GENERATION_STARTED, () => {
             turnToolCalls = [];
-            feedItems = [];
-            nextId = 0;
-            saveFeed();
-            if (panelEl?.classList.contains('open')) renderAllItems();
         });
     }
     if (event_types.MESSAGE_RECEIVED) {
         eventSource.on(event_types.MESSAGE_RECEIVED, printTurnSummary);
     }
+
+    queueHiddenToolCallRefresh(false);
 }
 
 // ── Persistence (chat metadata) ──
@@ -96,7 +128,6 @@ function saveFeed() {
     try {
         const context = getContext();
         if (!context.chatMetadata || !context.chatId) return;
-        // Don't save if the active chat changed out from under us (e.g. late callback)
         if (activeChatId && context.chatId !== activeChatId) return;
         context.chatMetadata[METADATA_KEY] = { items: feedItems, nextId };
         context.saveMetadataDebounced();
@@ -172,11 +203,9 @@ function openTreeEditorFromFeed() {
         picker.appendChild(btn);
     }
 
-    // Position near the settings button in the panel header
     const panelHeader = panelEl?.querySelector('.tv-float-panel-header');
     if (panelHeader) {
         panelHeader.appendChild(picker);
-        // Auto-dismiss on outside click
         const dismiss = (e) => {
             if (!picker.contains(e.target)) {
                 picker.remove();
@@ -353,32 +382,27 @@ function onWorldInfoActivated(entries) {
     const activeBooks = getActiveTunnelVisionBooks();
     if (activeBooks.length === 0) return;
 
+    const timestamp = Date.now();
+    const items = [];
     for (const entry of entries) {
         // Only show entries from TV-managed lorebooks
         if (entry.world && !isLorebookEnabled(entry.world)) continue;
 
-        const label = entry.comment || entry.key?.[0] || `UID ${entry.uid}`;
-        feedItems.unshift({
-            id: nextId++,
-            type: 'wi',
-            icon: 'fa-book-open',
-            verb: 'Triggered',
-            color: '#e84393',
-            summary: label,
-            uid: entry.uid,
-            keys: entry.key || [],
-            timestamp: Date.now(),
-        });
+        items.push(createEntryFeedItem({
+            source: 'native',
+            lorebook: typeof entry?.world === 'string' ? entry.world : '',
+            uid: Number.isFinite(entry?.uid) ? entry.uid : null,
+            title: entry.comment || entry.key?.[0] || `UID ${entry.uid}`,
+            keys: Array.isArray(entry.key) ? entry.key : [],
+            timestamp,
+        }));
     }
 
-    trimFeed();
-    updateBadge(entries.length);
-    if (panelEl?.classList.contains('open')) renderAllItems();
-    pulseTrigger();
+    addFeedItems(items);
 }
 
 function onToolCallsPerformed(invocations) {
-    if (!Array.isArray(invocations)) return;
+    if (!Array.isArray(invocations) || invocations.length === 0) return;
 
     const settings = getSettings();
     if (settings.globalEnabled === false) return;
@@ -389,31 +413,69 @@ function onToolCallsPerformed(invocations) {
         if (activeChatId && currentChatId !== activeChatId) return;
     } catch { /* no chat context */ }
 
-    for (const inv of invocations) {
-        if (!ALL_TOOL_NAMES.includes(inv.name)) continue;
+    const timestamp = Date.now();
+    const items = [];
 
-        let params = {};
-        try { params = JSON.parse(inv.parameters || '{}'); } catch { /* noop */ }
+    for (const invocation of invocations) {
+        if (!ALL_TOOL_NAMES.includes(invocation?.name)) continue;
 
-        const display = TOOL_DISPLAY[inv.name] || { icon: 'fa-gear', verb: 'Used', color: '#888' };
-        const summary = buildToolSummary(inv.name, params, inv.result || '');
-        feedItems.unshift({
+        const params = parseInvocationParameters(invocation.parameters);
+        const retrievedEntries = invocation.name === 'TunnelVision_Search'
+            ? extractRetrievedEntries(invocation.result)
+            : [];
+
+        // Create feed items for each retrieved entry
+        for (const entry of retrievedEntries) {
+            items.push(createEntryFeedItem({
+                source: 'tunnelvision',
+                lorebook: entry.lorebook,
+                uid: entry.uid,
+                title: entry.title || `UID ${entry.uid ?? '?'}`,
+                timestamp,
+            }));
+        }
+
+        const display = TOOL_DISPLAY[invocation.name] || { icon: 'fa-gear', verb: 'Used', color: '#888' };
+        const summary = buildToolSummary(invocation.name, params, invocation.result || '', retrievedEntries);
+        items.push({
             id: nextId++,
             type: 'tool',
             icon: display.icon,
             verb: display.verb,
             color: display.color,
             summary,
-            timestamp: Date.now(),
+            timestamp,
+            retrievedEntries,
         });
 
         // Accumulate for end-of-turn console summary
-        turnToolCalls.push({ name: inv.name, verb: display.verb, summary });
+        turnToolCalls.push({ name: invocation.name, verb: display.verb, summary });
     }
 
-    trimFeed();
-    if (panelEl?.classList.contains('open')) renderAllItems();
-    pulseTrigger();
+    addFeedItems(items);
+}
+
+function onToolCallsRendered(invocations) {
+    if (!Array.isArray(invocations) || invocations.length === 0) return;
+
+    if (!areTunnelVisionInvocations(invocations) || getSettings().stealthMode !== true) {
+        queueHiddenToolCallRefresh(false);
+        return;
+    }
+
+    const messageIndex = findRenderedToolCallMessageIndex(invocations);
+    if (messageIndex < 0) {
+        queueHiddenToolCallRefresh(false);
+        return;
+    }
+
+    const message = chat[messageIndex];
+    if (!message.extra) {
+        message.extra = {};
+    }
+    message.extra[HIDDEN_TOOL_CALL_FLAG] = true;
+
+    applyHiddenToolCallVisibility(messageIndex, true);
 }
 
 // ── Rendering ──
@@ -427,10 +489,20 @@ function renderEmptyState(tab) {
     panelBody.replaceChildren();
     const empty = el('div', 'tv-float-empty');
     empty.appendChild(icon('fa-satellite-dish'));
-    const msg = tab === 'tools' ? 'No tool calls yet' : 'No WorldBook entries active';
-    const sub = tab === 'tools' ? 'Tool calls will appear here during generation' : 'Start chatting to trigger worldbook entries';
-    empty.appendChild(el('span', null, msg));
-    empty.appendChild(el('span', 'tv-float-empty-sub', sub));
+
+    let message = 'No activity yet';
+    let subMessage = 'Injected entries and tool calls will appear here during generation';
+
+    if (tab === 'tools') {
+        message = 'No tool calls yet';
+        subMessage = 'Tool calls will appear here during generation';
+    } else if (tab === 'wi') {
+        message = 'No injected entries yet';
+        subMessage = 'Native activations and TunnelVision retrievals will appear here';
+    }
+
+    empty.appendChild(el('span', null, message));
+    empty.appendChild(el('span', 'tv-float-empty-sub', subMessage));
     panelBody.appendChild(empty);
 }
 
@@ -439,7 +511,7 @@ function renderAllItems() {
     const tab = getActiveTab();
     const filtered = feedItems.filter(item => {
         if (tab === 'all') return true;
-        if (tab === 'wi') return item.type === 'wi';
+        if (tab === 'wi') return item.type === 'entry' || item.type === 'wi';
         if (tab === 'tools') return item.type === 'tool';
         return true;
     });
@@ -456,7 +528,16 @@ function renderAllItems() {
 }
 
 function buildItemElement(item) {
-    const row = el('div', `tv-float-item${item.type === 'wi' ? ' tv-float-item-wi' : ''}`);
+    const rowClasses = ['tv-float-item'];
+    if (item.type === 'entry') {
+        rowClasses.push('tv-float-item-entry');
+        rowClasses.push(item.source === 'native' ? 'tv-float-item-entry-native' : 'tv-float-item-entry-tv');
+    } else if (item.type === 'wi') {
+        // Legacy feed items from before the type rename
+        rowClasses.push('tv-float-item-wi');
+    }
+
+    const row = el('div', rowClasses.join(' '));
 
     // Icon
     const iconWrap = el('div', 'tv-float-item-icon');
@@ -470,10 +551,14 @@ function buildItemElement(item) {
     const verb = el('span', 'tv-float-item-verb', item.verb);
     verb.style.color = item.color;
     textRow.appendChild(verb);
-    textRow.appendChild(el('span', 'tv-float-item-summary', item.summary));
+
+    const summaryText = (item.type === 'entry')
+        ? formatEntrySummary(item, shouldIncludeLorebookForEntries())
+        : (item.summary || '');
+    textRow.appendChild(el('span', 'tv-float-item-summary', summaryText));
     body.appendChild(textRow);
 
-    // Keys (for WI entries)
+    // Keys (for entry items)
     if (item.keys?.length > 0) {
         const keysRow = el('div', 'tv-float-item-keys');
         const shown = item.keys.slice(0, 4);
@@ -484,6 +569,29 @@ function buildItemElement(item) {
             keysRow.appendChild(el('span', 'tv-float-key-more', `+${item.keys.length - 4}`));
         }
         body.appendChild(keysRow);
+    }
+
+    // Retrieved entries (for tool items from search)
+    if (item.type === 'tool' && item.retrievedEntries?.length) {
+        const entriesRow = el('div', 'tv-float-item-entries');
+        const uniqueBooks = new Set(item.retrievedEntries.map(entry => entry.lorebook).filter(Boolean));
+        const includeLorebook = uniqueBooks.size > 1;
+        const shown = item.retrievedEntries.slice(0, MAX_RENDERED_RETRIEVED_ENTRIES);
+
+        for (const entry of shown) {
+            const chip = el('div', 'tv-float-entry-tag', formatRetrievedEntryLabel(entry, includeLorebook));
+            chip.title = `${entry.lorebook || 'Lorebook'} | UID ${entry.uid ?? '?'}${entry.title ? ` | ${entry.title}` : ''}`;
+            entriesRow.appendChild(chip);
+        }
+
+        if (item.retrievedEntries.length > MAX_RENDERED_RETRIEVED_ENTRIES) {
+            const remaining = item.retrievedEntries.length - MAX_RENDERED_RETRIEVED_ENTRIES;
+            entriesRow.appendChild(
+                el('div', 'tv-float-entry-more', `+${remaining} more retrieved entr${remaining === 1 ? 'y' : 'ies'}`),
+            );
+        }
+
+        body.appendChild(entriesRow);
     }
 
     row.appendChild(body);
@@ -513,6 +621,120 @@ function trimFeed() {
     saveFeed();
 }
 
+function addFeedItems(items) {
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    feedItems = [...items, ...feedItems];
+    trimFeed();
+    updateBadge(items.length);
+    if (panelEl?.classList.contains('open')) renderAllItems();
+    pulseTrigger();
+}
+
+// ── Hidden Tool Call (Visual Hiding) ──
+
+export async function refreshHiddenToolCallMessages({ syncFlags = false } = {}) {
+    const hideMode = getSettings().stealthMode === true;
+    let flagsMutated = false;
+
+    for (let messageIndex = 0; messageIndex < chat.length; messageIndex++) {
+        const message = chat[messageIndex];
+        const invocations = Array.isArray(message?.extra?.tool_invocations) ? message.extra.tool_invocations : null;
+        if (!invocations?.length) continue;
+
+        const isPureTunnelVision = areTunnelVisionInvocations(invocations);
+        if (!message.extra) {
+            message.extra = {};
+        }
+
+        if (syncFlags && !isPureTunnelVision && message.extra[HIDDEN_TOOL_CALL_FLAG]) {
+            delete message.extra[HIDDEN_TOOL_CALL_FLAG];
+            flagsMutated = true;
+        }
+
+        if (syncFlags && hideMode && isPureTunnelVision && message.extra[HIDDEN_TOOL_CALL_FLAG] !== true) {
+            message.extra[HIDDEN_TOOL_CALL_FLAG] = true;
+            flagsMutated = true;
+        }
+
+        const shouldHide = hideMode
+            && isPureTunnelVision
+            && message.extra[HIDDEN_TOOL_CALL_FLAG] === true;
+        applyHiddenToolCallVisibility(messageIndex, shouldHide);
+    }
+
+    if (flagsMutated) {
+        await saveChatConditional();
+    }
+}
+
+function queueHiddenToolCallRefresh(syncFlags = false) {
+    hiddenToolCallRefreshNeedsSync = hiddenToolCallRefreshNeedsSync || syncFlags;
+    if (hiddenToolCallRefreshTimer !== null) return;
+
+    hiddenToolCallRefreshTimer = window.setTimeout(async () => {
+        const shouldSync = hiddenToolCallRefreshNeedsSync;
+        hiddenToolCallRefreshTimer = null;
+        hiddenToolCallRefreshNeedsSync = false;
+        await refreshHiddenToolCallMessages({ syncFlags: shouldSync });
+    }, 50);
+}
+
+function applyHiddenToolCallVisibility(messageIndex, shouldHide) {
+    const messageElement = document.querySelector(`.mes[mesid="${messageIndex}"]`);
+    if (!(messageElement instanceof HTMLElement)) return;
+
+    messageElement.classList.toggle('tv-hidden-tool-call', shouldHide);
+    if (shouldHide) {
+        messageElement.dataset.tvHiddenToolCalls = 'true';
+    } else {
+        delete messageElement.dataset.tvHiddenToolCalls;
+    }
+}
+
+function findRenderedToolCallMessageIndex(invocations) {
+    for (let messageIndex = chat.length - 1; messageIndex >= 0; messageIndex--) {
+        const messageInvocations = chat[messageIndex]?.extra?.tool_invocations;
+        if (!Array.isArray(messageInvocations)) continue;
+
+        if (messageInvocations === invocations || toolInvocationArraysMatch(messageInvocations, invocations)) {
+            return messageIndex;
+        }
+    }
+
+    return -1;
+}
+
+function toolInvocationArraysMatch(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((leftInvocation, index) => {
+        const rightInvocation = right[index];
+        return leftInvocation?.name === rightInvocation?.name
+            && String(leftInvocation?.id ?? '') === String(rightInvocation?.id ?? '')
+            && normalizeInvocationField(leftInvocation?.parameters) === normalizeInvocationField(rightInvocation?.parameters);
+    });
+}
+
+function normalizeInvocationField(value) {
+    if (typeof value === 'string') return value;
+    if (value === undefined || value === null) return '';
+
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return String(value);
+    }
+}
+
+function areTunnelVisionInvocations(invocations) {
+    return Array.isArray(invocations)
+        && invocations.length > 0
+        && invocations.every(invocation => ALL_TOOL_NAMES.includes(invocation?.name));
+}
+
 // ── Public API ──
 
 export function clearFeed() {
@@ -526,59 +748,175 @@ export function getFeedItems() {
     return [...feedItems];
 }
 
-// ── Utilities ──
+// ── Entry / Retrieved Entry Helpers ──
 
-function buildToolSummary(toolName, params, result) {
+function createEntryFeedItem({ source, lorebook = '', uid = null, title = '', keys = [], timestamp }) {
+    return {
+        id: nextId++,
+        type: 'entry',
+        source,
+        icon: 'fa-book-open',
+        verb: source === 'native' ? 'Triggered' : 'Injected',
+        color: source === 'native' ? '#e84393' : '#fdcb6e',
+        lorebook,
+        uid,
+        title,
+        keys,
+        timestamp,
+    };
+}
+
+function shouldIncludeLorebookForEntries() {
+    const lorebooks = new Set(
+        feedItems
+            .filter(item => item.type === 'entry' && typeof item.lorebook === 'string' && item.lorebook.trim())
+            .map(item => item.lorebook.trim()),
+    );
+    return lorebooks.size > 1;
+}
+
+function formatEntrySummary(item, includeLorebook) {
+    const title = truncate(item.title || `UID ${item.uid ?? '?'}`, includeLorebook ? 42 : 52);
+    const uidLabel = item.uid !== null && item.uid !== undefined ? `#${item.uid}` : '#?';
+
+    if (includeLorebook && item.lorebook) {
+        return `${item.lorebook}: ${title} (${uidLabel})`;
+    }
+
+    return `${title} (${uidLabel})`;
+}
+
+function formatRetrievedEntryLabel(entry, includeLorebook) {
+    const title = truncate(entry.title || `UID ${entry.uid ?? '?'}`, includeLorebook ? 42 : 52);
+    const uidLabel = entry.uid !== null && entry.uid !== undefined ? `#${entry.uid}` : '#?';
+
+    return includeLorebook
+        ? `${entry.lorebook}: ${title} (${uidLabel})`
+        : `${title} (${uidLabel})`;
+}
+
+// ── Retrieved Entry Parsing ──
+
+function parseInvocationParameters(parameters) {
+    if (!parameters) return {};
+    if (typeof parameters === 'object') return parameters;
+
+    try {
+        return JSON.parse(parameters);
+    } catch {
+        return {};
+    }
+}
+
+function extractRetrievedEntries(result) {
+    if (!result) return [];
+
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    const entries = [];
+    const seen = new Set();
+
+    for (const line of text.split(/\r?\n/)) {
+        const entry = parseRetrievedEntryHeader(line.trim());
+        if (!entry) continue;
+
+        const key = `${entry.lorebook}:${entry.uid ?? '?'}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push(entry);
+    }
+
+    return entries;
+}
+
+function parseRetrievedEntryHeader(line) {
+    if (!line.startsWith('[Lorebook: ') || !line.endsWith(']')) {
+        return null;
+    }
+
+    const body = line.slice(1, -1);
+    const parts = body.split(' | ');
+    if (parts.length < 3) {
+        return null;
+    }
+
+    const lorebook = parts[0].replace(/^Lorebook:\s*/, '').trim();
+    const uidRaw = parts[1].replace(/^UID:\s*/, '').trim();
+    const title = parts.slice(2).join(' | ').replace(/^Title:\s*/, '').trim();
+    const uid = parseInt(uidRaw, 10);
+
+    return {
+        lorebook,
+        uid: Number.isFinite(uid) ? uid : null,
+        title,
+    };
+}
+
+// ── Tool Summary Builder ──
+
+function buildToolSummary(toolName, params, result, retrievedEntries = []) {
     switch (toolName) {
         case 'TunnelVision_Search': {
-            const action = params.action || 'navigate';
-            const reasoning = params.reasoning || '';
-            const query = params.query || '';
-            const nodeIds = params.node_ids || (params.node_id ? [params.node_id] : []);
-            let count = '';
-            try {
-                const parsed = JSON.parse(result);
-                if (Array.isArray(parsed)) count = ` → ${parsed.length} entries`;
-                else if (parsed.entries) count = ` → ${parsed.entries.length} entries`;
-            } catch { /* noop */ }
-            if (action === 'search' && query) return `"${truncate(query, 40)}"${count}`;
-            if (reasoning) return `${truncate(reasoning, 50)}${count}`;
-            if (nodeIds.length > 0) return `${action} [${nodeIds.slice(0, 3).join(', ')}${nodeIds.length > 3 ? '...' : ''}]${count}`;
-            return `${action}${count}`;
+            const action = params.action || 'retrieve';
+            const nodeIds = Array.isArray(params.node_ids) ? params.node_ids : (params.node_id ? [params.node_id] : []);
+            if (action === 'navigate') {
+                return nodeIds.length > 0 ? `navigate ${nodeIds[0]}` : 'navigate tree';
+            }
+            if (retrievedEntries.length > 0) {
+                if (retrievedEntries.length === 1) {
+                    const entry = retrievedEntries[0];
+                    return `retrieved "${truncate(entry.title || `UID ${entry.uid ?? '?'}`, 42)}"`;
+                }
+                const lorebooks = new Set(retrievedEntries.map(entry => entry.lorebook).filter(Boolean));
+                if (lorebooks.size === 1) {
+                    return `retrieved ${retrievedEntries.length} entries from ${Array.from(lorebooks)[0]}`;
+                }
+                return `retrieved ${retrievedEntries.length} entries from ${lorebooks.size} lorebooks`;
+            }
+            if (typeof result === 'string' && result.startsWith('Node(s) not found:')) {
+                return truncate(result, 60);
+            }
+            return nodeIds.length > 0 ? `retrieve ${nodeIds.join(', ')}` : 'search tree';
         }
         case 'TunnelVision_Remember': {
-            const title = params.title || params.comment || params.name || params.key || '';
+            const title = params.title || '';
             return title ? `"${truncate(title, 50)}"` : 'new entry';
         }
         case 'TunnelVision_Update': {
-            const title = params.title || params.comment || params.name || '';
-            const uid = params.uid;
-            if (title) return `"${truncate(title, 50)}"`;
-            return uid !== undefined ? `UID ${uid}` : 'existing entry';
+            const uid = params.uid ?? '';
+            const title = params.title || '';
+            if (title) return `UID ${uid || '?'} -> "${truncate(title, 40)}"`;
+            return uid ? `UID ${uid}` : 'existing entry';
         }
         case 'TunnelVision_Forget': {
-            const target = params.name || params.title || '';
-            const uid = params.uid;
-            if (target) return `"${truncate(target, 50)}"`;
-            return uid !== undefined ? `UID ${uid}` : 'an entry';
+            const uid = params.uid ?? '';
+            const reason = params.reason || '';
+            if (uid && reason) return `UID ${uid} (${truncate(reason, 30)})`;
+            return uid ? `UID ${uid}` : 'an entry';
         }
-        case 'TunnelVision_Reorganize': {
-            const action = params.action || '';
-            const target = params.node_id || params.entry_uid || '';
-            if (action && target) return `${action} → ${truncate(String(target), 30)}`;
-            return action || 'tree structure';
-        }
+        case 'TunnelVision_Reorganize':
+            switch (params.action) {
+                case 'move':
+                    return `UID ${params.uid ?? '?'} -> ${params.target_node_id || '?'}`;
+                case 'create_category':
+                    return params.label ? `create "${truncate(params.label, 40)}"` : 'create category';
+                case 'list_entries':
+                    return params.node_id ? `list ${params.node_id}` : 'list entries';
+                default:
+                    return params.action || 'tree structure';
+            }
         case 'TunnelVision_Summarize': {
-            const scene = params.title || params.scene || '';
-            return scene ? `"${truncate(scene, 50)}"` : 'scene summary';
+            const title = params.title || '';
+            return title ? `"${truncate(title, 50)}"` : 'scene summary';
         }
         case 'TunnelVision_MergeSplit': {
-            const action = params.action || 'merge';
-            const title = params.merged_title || params.new_title || '';
-            if (title) return `${action}: "${truncate(title, 40)}"`;
-            const uids = [params.keep_uid, params.remove_uid, params.uid].filter(u => u !== undefined);
-            if (uids.length > 0) return `${action} UIDs [${uids.join(', ')}]`;
-            return action;
+            const action = params.action || '';
+            if (action === 'merge') {
+                return `merge ${params.keep_uid ?? '?'} + ${params.remove_uid ?? '?'}`;
+            }
+            if (action === 'split') {
+                return `split ${params.uid ?? '?'}`;
+            }
+            return 'entries';
         }
         case 'TunnelVision_Notebook': {
             const action = params.action || 'write';

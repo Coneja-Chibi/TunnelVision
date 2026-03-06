@@ -14,6 +14,7 @@ const TV_AUTOSUMMARY_KEY = 'tunnelvision_autosummary';
 
 /** Message count since last summary, keyed by chatId */
 const counters = new Map();
+const pendingSummaries = new Map();
 
 let _autoSummaryInitialized = false;
 
@@ -60,10 +61,8 @@ function onMessageReceived() {
 
 function onGenerationForAutoSummary() {
     const settings = getSettings();
-
-    // Clear any previous injection if feature disabled
     if (!settings.autoSummaryEnabled || settings.globalEnabled === false) {
-        setExtensionPrompt(TV_AUTOSUMMARY_KEY, '', extension_prompt_types.IN_PROMPT, 0);
+        clearPrompt();
         return;
     }
 
@@ -72,25 +71,41 @@ function onGenerationForAutoSummary() {
 
     const count = counters.get(chatId) || 0;
     const interval = settings.autoSummaryInterval || 20;
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length === 0) {
+        clearPrompt();
+        return;
+    }
 
     if (count >= interval) {
-        const activeBooks = getActiveTunnelVisionBooks();
-        if (activeBooks.length === 0) return;
+        if (!pendingSummaries.has(chatId)) {
+            pendingSummaries.set(chatId, { triggeredAt: count });
+            console.log(`[TunnelVision] Auto-summary pending after ${count} messages`);
+        }
 
-        const prompt = `[AUTO-SUMMARY INSTRUCTION: ${count} messages have passed since the last summary. You MUST call TunnelVision_Summarize this turn to create a summary of recent events. Write a descriptive title and thorough summary of what has happened in the last ~${count} messages. Set messages_back to ${count}. After summarizing, continue responding to the user normally.]`;
-
+        const prompt = `[AUTO-SUMMARY INSTRUCTION: ${count} messages have passed since the last summary. You MUST call TunnelVision_Summarize this turn to create a summary of recent events. Write a descriptive title and thorough summary of what has happened in the last ~${count} messages. After summarizing, continue responding to the user normally.]`;
         setExtensionPrompt(TV_AUTOSUMMARY_KEY, prompt, extension_prompt_types.IN_PROMPT, 0);
-        counters.set(chatId, 0);
-        console.log(`[TunnelVision] Auto-summary triggered after ${count} messages`);
-    } else {
-        setExtensionPrompt(TV_AUTOSUMMARY_KEY, '', extension_prompt_types.IN_PROMPT, 0);
+        return;
     }
+
+    clearPrompt();
 }
 
 function onChatChanged() {
-    // Don't reset existing counters — they persist across chat switches
-    // Just clear any lingering injected prompt
+    clearPrompt();
+}
+
+function clearPrompt() {
     setExtensionPrompt(TV_AUTOSUMMARY_KEY, '', extension_prompt_types.IN_PROMPT, 0);
+}
+
+export function markAutoSummaryComplete() {
+    const chatId = getChatId();
+    if (!chatId) return;
+
+    counters.set(chatId, 0);
+    pendingSummaries.delete(chatId);
+    clearPrompt();
 }
 
 /** Get the current counter for the active chat. Used by UI. */
@@ -104,5 +119,8 @@ export function getAutoSummaryCount() {
 export function resetAutoSummaryCount() {
     const chatId = getChatId();
     if (!chatId) return;
+
     counters.set(chatId, 0);
+    pendingSummaries.delete(chatId);
+    clearPrompt();
 }

@@ -5,21 +5,23 @@
 
 import { selected_world_info, world_names, loadWorldInfo, createWorldInfoEntry, saveWorldInfo } from '../../../world-info.js';
 import { ToolManager } from '../../../tool-calling.js';
-import { main_api, online_status, event_types, generateRaw } from '../../../../script.js';
+import { main_api, online_status, event_types, generateRaw, saveSettingsDebounced } from '../../../../script.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 import { extension_settings } from '../../../extensions.js';
 import {
     getTree,
     createEmptyTree,
-    isLorebookEnabled,
     getAllEntryUids,
     findNodeById,
     getSettings,
     saveTree,
     getBookDescription,
+    isTrackerTitle,
+    getConnectionProfileId,
+    findConnectionProfile,
 } from './tree-store.js';
 import { getContext } from '../../../st-context.js';
-import { getActiveTunnelVisionBooks, ALL_TOOL_NAMES } from './tool-registry.js';
+import { getActiveTunnelVisionBooks, ALL_TOOL_NAMES, CONFIRMABLE_TOOLS, preflightToolRuntimeState } from './tool-registry.js';
 
 
 /**
@@ -34,6 +36,7 @@ import { getActiveTunnelVisionBooks, ALL_TOOL_NAMES } from './tool-registry.js';
  * @returns {DiagResult[]}
  */
 export async function runDiagnostics() {
+    const settingsBefore = JSON.stringify(getSettings());
     const results = [];
 
     results.push(checkSettingsExist());
@@ -46,8 +49,10 @@ export async function runDiagnostics() {
     results.push(...checkDuplicateUids());
     results.push(...await checkEmptyLorebooks());
     results.push(...checkNodeIntegrity());
-    results.push(checkToolRegistered());
+    results.push(...await checkToolRuntimeDuringDiagnostics());
     results.push(checkDisabledTools());
+    results.push(checkConfirmToolConfig());
+    results.push(checkToolPromptOverrides());
     results.push(checkWorldInfoApi());
     results.push(checkOrphanedTrees());
     results.push(checkSearchMode());
@@ -69,13 +74,19 @@ export async function runDiagnostics() {
     results.push(checkAutoSummaryConfig());
     results.push(checkMultiBookMode());
     results.push(checkConnectionProfile());
-    results.push(...checkTrackerUids());
+    results.push(...await checkTrackerUids());
     results.push(...checkArcNodes());
     results.push(checkNotebookConfig());
     results.push(checkStealthMode());
     results.push(checkAutoHideSummarized());
+    results.push(checkConstantPassthrough());
     results.push(...checkBookDescriptions());
     results.push(checkTurnSummaryEvent());
+
+    const settingsAfter = JSON.stringify(getSettings());
+    if (settingsBefore !== settingsAfter) {
+        saveSettingsDebounced();
+    }
 
     return results;
 }
@@ -211,30 +222,49 @@ async function checkEntryUidsValid() {
     return results;
 }
 
-/** Check if all TunnelVision tools are properly registered. */
-function checkToolRegistered() {
-    const activeBooks = getActiveTunnelVisionBooks();
-    if (activeBooks.length === 0) {
-        return pass('No active TunnelVision lorebooks — tools correctly unregistered');
+/** Check tool runtime state using preflightToolRuntimeState — repairs and validates registration. */
+async function checkToolRuntimeDuringDiagnostics() {
+    const snapshot = await preflightToolRuntimeState({ repair: true, reason: 'diagnostics', log: true });
+    const results = [];
+
+    if (snapshot.activeBooks.length === 0) {
+        results.push(pass('No active TunnelVision lorebooks — tools correctly unregistered'));
+        results.push(pass('No active TunnelVision lorebooks — no ST stealth flags to validate'));
+        results.push(pass('No active TunnelVision lorebooks — no next-generation TunnelVision tools required'));
+        return results;
     }
 
-    const missing = [];
-    for (const toolName of ALL_TOOL_NAMES) {
-        try {
-            const name = ToolManager.getDisplayName(toolName);
-            if (!name) missing.push(toolName);
-        } catch {
-            missing.push(toolName);
-        }
+    if (snapshot.expectedToolNames.length === 0) {
+        results.push(warn('All enabled TunnelVision tools are disabled, so none are expected to be registered.'));
+        results.push(pass('No enabled TunnelVision tools use ST stealth'));
+        results.push(warn('Next-generation tool eligibility: no enabled TunnelVision tools are available because they are disabled in settings.'));
+        return results;
     }
 
-    if (missing.length === 0) {
-        return pass(`All ${ALL_TOOL_NAMES.length} TunnelVision tools registered`);
+    if (snapshot.missingToolNames.length === 0) {
+        const suffix = snapshot.repairApplied ? ' (recovered during diagnostics)' : '';
+        results.push(pass(`All ${snapshot.expectedToolNames.length} enabled TunnelVision tools registered${suffix}`));
+    } else if (snapshot.registeredToolNames.length === 0) {
+        results.push(fail(`No enabled TunnelVision tools are registered. Missing: ${snapshot.missingToolNames.join(', ')}`));
+    } else {
+        results.push(warn(`${snapshot.missingToolNames.length} enabled TunnelVision tool(s) not registered: ${snapshot.missingToolNames.join(', ')}`));
     }
-    if (missing.length === ALL_TOOL_NAMES.length) {
-        return fail(`No TunnelVision tools are registered. Re-register via settings toggle.`);
+
+    if (snapshot.stealthToolNames.length === 0) {
+        results.push(pass('No enabled TunnelVision tools use ST stealth'));
+    } else {
+        results.push(fail(`Enabled TunnelVision tools still using ST stealth: ${snapshot.stealthToolNames.join(', ')}`));
     }
-    return warn(`${missing.length} tool(s) not registered: ${missing.join(', ')}`);
+
+    if (snapshot.eligibilityErrors.length > 0) {
+        results.push(fail(`Next-generation tool eligibility check failed: ${snapshot.eligibilityErrors.join(' | ')}`));
+    } else if (snapshot.eligibleToolNames.length > 0) {
+        results.push(pass(`Next-generation tool eligibility: ${snapshot.eligibleToolNames.length} tool(s) available (${snapshot.eligibleToolNames.join(', ')})`));
+    } else {
+        results.push(fail('Next-generation tool eligibility: no TunnelVision tools would be offered on the next generation despite active lorebooks.'));
+    }
+
+    return results;
 }
 
 /** Report which tools the user has manually disabled via Advanced Settings. */
@@ -250,6 +280,73 @@ function checkDisabledTools() {
         return warn('All TunnelVision tools are disabled in Advanced Settings. The AI cannot use any memory features.');
     }
     return warn(`${disabledNames.length} tool(s) disabled: ${disabledNames.map(n => n.replace('TunnelVision_', '')).join(', ')}`);
+}
+
+/** Check confirm tool configuration for invalid references. */
+function checkConfirmToolConfig() {
+    const settings = getSettings();
+    const confirmTools = settings.confirmTools || {};
+    const enabledNames = Object.keys(confirmTools).filter(name => confirmTools[name]);
+
+    if (enabledNames.length === 0) {
+        return pass('Tool confirmation: none enabled');
+    }
+
+    const invalid = enabledNames.filter(name => !ALL_TOOL_NAMES.includes(name));
+    if (invalid.length > 0) {
+        // Auto-fix: remove invalid references
+        for (const name of invalid) {
+            delete confirmTools[name];
+        }
+        return warn(`Tool confirmation: removed ${invalid.length} invalid tool reference(s): ${invalid.join(', ')}`);
+    }
+
+    const notConfirmable = enabledNames.filter(name => !CONFIRMABLE_TOOLS.has(name));
+    if (notConfirmable.length > 0) {
+        // Auto-fix: remove non-confirmable tool references
+        for (const name of notConfirmable) {
+            delete confirmTools[name];
+        }
+        return warn(`Tool confirmation: removed ${notConfirmable.length} non-confirmable tool reference(s): ${notConfirmable.map(n => n.replace('TunnelVision_', '')).join(', ')}`);
+    }
+
+    return pass(`Tool confirmation: ${enabledNames.length} tool(s) require approval (${enabledNames.map(n => n.replace('TunnelVision_', '')).join(', ')})`);
+}
+
+/** Check tool prompt overrides for invalid or empty entries. */
+function checkToolPromptOverrides() {
+    const settings = getSettings();
+    const overrides = settings.toolPromptOverrides || {};
+    const overrideNames = Object.keys(overrides);
+
+    if (overrideNames.length === 0) {
+        return pass('Tool prompt overrides: none configured');
+    }
+
+    let fixed = 0;
+
+    // Auto-fix: remove empty string overrides
+    for (const name of overrideNames) {
+        if (typeof overrides[name] === 'string' && overrides[name].trim() === '') {
+            delete overrides[name];
+            fixed++;
+        }
+    }
+
+    // Warn about invalid tool names
+    const remaining = Object.keys(overrides);
+    const invalid = remaining.filter(name => !ALL_TOOL_NAMES.includes(name));
+    for (const name of invalid) {
+        delete overrides[name];
+        fixed++;
+    }
+
+    if (fixed > 0) {
+        const activeCount = Object.keys(overrides).length;
+        return warn(`Tool prompt overrides: auto-removed ${fixed} invalid/empty override(s). ${activeCount} valid override(s) remaining.`);
+    }
+
+    return pass(`Tool prompt overrides: ${remaining.length} tool(s) have custom descriptions`);
 }
 
 /** Check that tree nodes have LLM-generated summaries (PageIndex pattern). */
@@ -595,6 +692,11 @@ function checkActivityFeedEvent() {
     } else {
         results.push(pass('TOOL_CALLS_PERFORMED event available for tool tracking'));
     }
+    if (!event_types || !event_types.TOOL_CALLS_RENDERED) {
+        results.push(warn('event_types.TOOL_CALLS_RENDERED not found. Visual hiding of tool-call messages will not work after render.'));
+    } else {
+        results.push(pass('TOOL_CALLS_RENDERED event available for visual hiding'));
+    }
     // Check that the floating trigger was injected into DOM
     if (!document.querySelector('.tv-float-trigger')) {
         results.push(warn('Activity feed floating trigger not found in DOM. The feed widget may not have initialized.'));
@@ -708,44 +810,104 @@ function checkMultiBookMode() {
 
 /** Check connection profile reference is valid and Connection Manager is available. */
 function checkConnectionProfile() {
-    const settings = getSettings();
-    if (!settings.connectionProfile) {
+    const profileId = getConnectionProfileId();
+    if (!profileId) {
         return pass('Connection profile: using current API settings');
     }
 
-    // Try to verify the profile exists via Connection Manager settings
-    try {
-        const cmSettings = extension_settings?.connectionManager;
-        if (!cmSettings) {
-            return warn(`Connection profile "${settings.connectionProfile}" is set but Connection Manager extension is not loaded. Profile switching will fall back to current API.`);
-        }
-        if (cmSettings.profiles && Array.isArray(cmSettings.profiles)) {
-            const exists = cmSettings.profiles.some(p => p.name === settings.connectionProfile);
-            if (exists) {
-                return pass(`Connection profile: "${settings.connectionProfile}"`);
-            }
-            return warn(`Connection profile "${settings.connectionProfile}" not found in Connection Manager. It may have been deleted.`);
-        }
-    } catch { /* ignore */ }
-    return pass(`Connection profile: "${settings.connectionProfile}" (unverified — Connection Manager may not be loaded)`);
+    const cmSettings = extension_settings?.connectionManager;
+    if (!cmSettings) {
+        return warn(`Connection profile "${profileId}" is set but Connection Manager is not loaded. Profile switching will fall back to the current API.`);
+    }
+
+    const profile = findConnectionProfile(profileId);
+    if (!profile) {
+        return warn(`Connection profile ID "${profileId}" was not found in Connection Manager. It may have been deleted.`);
+    }
+    return pass(`Connection profile: "${profile.name}" (${profile.id})`);
 }
 
-/** Check tracker UIDs reference valid entries. */
-function checkTrackerUids() {
+/** Check tracker UIDs reference valid entries, auto-remove stale, auto-detect title-based trackers. */
+async function checkTrackerUids() {
     const results = [];
     const settings = getSettings();
     const trackerUids = settings.trackerUids || {};
     let totalTrackers = 0;
 
     for (const bookName of Object.keys(trackerUids)) {
-        const uids = trackerUids[bookName];
-        if (!Array.isArray(uids) || uids.length === 0) continue;
-        totalTrackers += uids.length;
+        const uids = Array.isArray(trackerUids[bookName]) ? trackerUids[bookName] : [];
+        if (uids.length === 0) continue;
+
+        if (!world_names?.includes(bookName)) {
+            delete trackerUids[bookName];
+            results.push(warn(`Tracker entries for missing lorebook "${bookName}" were removed.`));
+            continue;
+        }
+
+        const bookData = await loadWorldInfo(bookName);
+        if (!bookData?.entries) {
+            results.push(warn(`Tracker entries for "${bookName}" could not be validated because the lorebook failed to load.`));
+            continue;
+        }
+
+        const entryMap = new Map();
+        for (const key of Object.keys(bookData.entries)) {
+            const entry = bookData.entries[key];
+            entryMap.set(entry.uid, entry);
+        }
+
+        const next = [];
+        let staleCount = 0;
+        let disabledCount = 0;
+        let migratedCount = 0;
+
+        for (const uid of uids) {
+            const entry = entryMap.get(uid);
+            if (!entry) {
+                staleCount++;
+                continue;
+            }
+            if (entry.disable) {
+                disabledCount++;
+                continue;
+            }
+            if (!next.includes(uid)) {
+                next.push(uid);
+            }
+        }
+
+        // Auto-detect entries with tracker titles that aren't tracked yet
+        for (const entry of entryMap.values()) {
+            if (entry.disable || !isTrackerTitle(entry.comment) || next.includes(entry.uid)) continue;
+            next.push(entry.uid);
+            migratedCount++;
+        }
+
+        // Normalize: sort and dedupe
+        next.sort((a, b) => a - b);
+        if (next.length > 0) {
+            trackerUids[bookName] = next;
+        } else {
+            delete trackerUids[bookName];
+        }
+
+        totalTrackers += next.length;
+
+        if (staleCount > 0 || disabledCount > 0 || migratedCount > 0) {
+            results.push(
+                warn(
+                    `"${bookName}" tracker list was normalized: ` +
+                    `${staleCount} stale removed, ${disabledCount} disabled removed, ${migratedCount} title-based tracker(s) added.`,
+                ),
+            );
+        } else {
+            results.push(pass(`"${bookName}" tracker entries validated (${next.length})`));
+        }
     }
 
     if (totalTrackers === 0) {
         results.push(pass('Tracker entries: none configured'));
-    } else {
+    } else if (Object.keys(trackerUids).length > 1) {
         results.push(pass(`Tracker entries: ${totalTrackers} configured across ${Object.keys(trackerUids).length} lorebook(s)`));
     }
 
@@ -801,9 +963,9 @@ function checkNotebookConfig() {
 function checkStealthMode() {
     const settings = getSettings();
     if (settings.stealthMode === true) {
-        return warn('Stealth mode: ON. All TunnelVision tool calls are hidden from chat output. Disable if you need to debug tool call behavior.');
+        return warn('Hide tool-call messages: ON. TunnelVision tool-call messages are visually hidden in chat. Disable if you need to debug tool call behavior.');
     }
-    return pass('Stealth mode: off (tool calls visible in chat)');
+    return pass('Hide tool-call messages: off (tool calls visible in chat)');
 }
 
 /** Check auto-hide summarized messages config. */
@@ -813,6 +975,15 @@ function checkAutoHideSummarized() {
         return pass('Auto-hide summarized: ON. Messages covered by summaries will be hidden from chat to save tokens.');
     }
     return pass('Auto-hide summarized: off. Summarized messages remain visible in chat.');
+}
+
+/** Check constant entry passthrough setting and warn about implications. */
+function checkConstantPassthrough() {
+    const settings = getSettings();
+    if (settings.passthroughConstant !== false) {
+        return pass('Constant entry passthrough: ON. Entries marked "Always Active" in TV-managed lorebooks will bypass tree gating and inject normally via ST.');
+    }
+    return warn('Constant entry passthrough: OFF. All entries in TV-managed lorebooks are suppressed from normal WI injection, including constant (always-active) entries like chat summaries. If you have constant entries that should always appear in context, enable "Constant Entry Passthrough" in Advanced Settings.');
 }
 
 /** Check that MESSAGE_RECEIVED event exists for turn-level console summary. */
