@@ -13,6 +13,9 @@ const MAX_FEED_ITEMS = 50;
 const STORAGE_KEY_POS = 'tv-feed-trigger-position';
 const METADATA_KEY = 'tunnelvision_feed';
 
+/** Track which chatId the current feedItems belong to, prevents cross-chat bleed. */
+let activeChatId = null;
+
 // Turn-level tool call accumulator for console summary
 /** @type {Array<{name: string, verb: string, summary: string}>} */
 let turnToolCalls = [];
@@ -85,27 +88,28 @@ export function initActivityFeed() {
 function saveFeed() {
     try {
         const context = getContext();
-        if (!context.chatMetadata) return;
+        if (!context.chatMetadata || !context.chatId) return;
+        // Don't save if the active chat changed out from under us (e.g. late callback)
+        if (activeChatId && context.chatId !== activeChatId) return;
         context.chatMetadata[METADATA_KEY] = { items: feedItems, nextId };
         context.saveMetadataDebounced();
     } catch { /* no active chat */ }
 }
 
 function loadFeed() {
+    feedItems = [];
+    nextId = 0;
+    activeChatId = null;
     try {
         const context = getContext();
+        if (!context.chatId) return;
+        activeChatId = context.chatId;
         const data = context.chatMetadata?.[METADATA_KEY];
-        if (!data || !Array.isArray(data.items)) {
-            feedItems = [];
-            nextId = 0;
-            return;
+        if (data && Array.isArray(data.items)) {
+            feedItems = data.items;
+            nextId = typeof data.nextId === 'number' ? data.nextId : feedItems.length;
         }
-        feedItems = data.items;
-        nextId = typeof data.nextId === 'number' ? data.nextId : feedItems.length;
-    } catch {
-        feedItems = [];
-        nextId = 0;
-    }
+    } catch { /* no active chat */ }
 }
 
 // ── DOM Helpers ──
@@ -316,6 +320,12 @@ function onWorldInfoActivated(entries) {
     const settings = getSettings();
     if (settings.globalEnabled === false) return;
 
+    // Guard: ignore callbacks from a chat we've already switched away from
+    try {
+        const currentChatId = getContext().chatId;
+        if (activeChatId && currentChatId !== activeChatId) return;
+    } catch { /* no chat context */ }
+
     const activeBooks = getActiveTunnelVisionBooks();
     if (activeBooks.length === 0) return;
 
@@ -348,6 +358,12 @@ function onToolCallsPerformed(invocations) {
 
     const settings = getSettings();
     if (settings.globalEnabled === false) return;
+
+    // Guard: ignore callbacks from a chat we've already switched away from
+    try {
+        const currentChatId = getContext().chatId;
+        if (activeChatId && currentChatId !== activeChatId) return;
+    } catch { /* no chat context */ }
 
     for (const inv of invocations) {
         if (!ALL_TOOL_NAMES.includes(inv.name)) continue;
