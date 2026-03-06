@@ -5,7 +5,8 @@
  */
 
 import { eventSource, event_types } from '../../../../script.js';
-import { ALL_TOOL_NAMES } from './tool-registry.js';
+import { ALL_TOOL_NAMES, getActiveTunnelVisionBooks } from './tool-registry.js';
+import { getSettings, isLorebookEnabled } from './tree-store.js';
 
 const MAX_FEED_ITEMS = 50;
 const STORAGE_KEY_POS = 'tv-feed-trigger-position';
@@ -231,7 +232,16 @@ function positionPanel() {
 function onWorldInfoActivated(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return;
 
+    const settings = getSettings();
+    if (settings.globalEnabled === false) return;
+
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length === 0) return;
+
     for (const entry of entries) {
+        // Only show entries from TV-managed lorebooks
+        if (entry.world && !isLorebookEnabled(entry.world)) continue;
+
         const label = entry.comment || entry.key?.[0] || `UID ${entry.uid}`;
         feedItems.unshift({
             id: nextId++,
@@ -254,6 +264,9 @@ function onWorldInfoActivated(entries) {
 
 function onToolCallsPerformed(invocations) {
     if (!Array.isArray(invocations)) return;
+
+    const settings = getSettings();
+    if (settings.globalEnabled === false) return;
 
     for (const inv of invocations) {
         if (!ALL_TOOL_NAMES.includes(inv.name)) continue;
