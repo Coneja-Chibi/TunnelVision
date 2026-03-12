@@ -21,6 +21,7 @@ import {
     saveTree,
     getAllEntryUids,
     getSettings,
+    findConnectionProfile,
 } from './tree-store.js';
 
 /**
@@ -76,9 +77,15 @@ async function generateRaw(opts) {
  */
 async function withConnectionProfile(fn) {
     const settings = getSettings();
-    const targetProfile = settings.connectionProfile;
-    if (!targetProfile) {
+    const targetProfileId = settings.connectionProfile;
+    if (!targetProfileId) {
         console.log('[TunnelVision] No connection profile configured, using current API.');
+        return fn();
+    }
+
+    const targetProfile = findConnectionProfile(targetProfileId);
+    if (!targetProfile?.name) {
+        console.warn(`[TunnelVision] Configured connection profile "${targetProfileId}" was not found. Using current API.`);
         return fn();
     }
 
@@ -92,13 +99,13 @@ async function withConnectionProfile(fn) {
     const originalProfile = await profileCmd.callback({}, '');
 
     // Skip switching if already on the target profile
-    if (originalProfile === targetProfile) {
+    if (originalProfile === targetProfile.name) {
         return fn();
     }
 
     try {
-        console.log(`[TunnelVision] Switching to connection profile: "${targetProfile}"`);
-        await profileCmd.callback({ await: 'true', timeout: '5000' }, targetProfile);
+        console.log(`[TunnelVision] Switching to connection profile: "${targetProfile.name}" (${targetProfile.id})`);
+        await profileCmd.callback({ await: 'true', timeout: '5000' }, targetProfile.name);
         return await fn();
     } finally {
         await profileCmd.callback({ await: 'true', timeout: '5000' }, originalProfile || '<None>');
