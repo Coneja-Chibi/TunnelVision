@@ -11,6 +11,7 @@ import { characters, this_chid, chat_metadata } from '../../../../script.js';
 import { getCharaFilename } from '../../../utils.js';
 import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { isLorebookEnabled, getSettings, getTree, getBookDescription, syncTrackerUidsForLorebook, canReadBook, canWriteBook } from './tree-store.js';
+import { logToolCallStarted } from './activity-feed.js';
 
 import { getDefinition as getSearchDef, getTreeOverview, TOOL_NAME as SEARCH_NAME, COMPACT_DESCRIPTION as SEARCH_COMPACT } from './tools/search.js';
 import { getDefinition as getRememberDef, TOOL_NAME as REMEMBER_NAME, COMPACT_DESCRIPTION as REMEMBER_COMPACT } from './tools/remember.js';
@@ -430,6 +431,20 @@ function wrapWithConfirmation(originalAction, displayName) {
 }
 
 /**
+ * Wrap a tool's action to fire a live feed item the instant it's invoked.
+ * The in-progress item is automatically replaced when TOOL_CALLS_PERFORMED fires.
+ * @param {Function} originalAction
+ * @param {string} toolName
+ * @returns {Function}
+ */
+function wrapWithLiveFeed(originalAction, toolName) {
+    return async function (args) {
+        try { logToolCallStarted(toolName, args || {}); } catch { /* feed not critical */ }
+        return originalAction(args);
+    };
+}
+
+/**
  * Build the guide tool description listing all enabled tools with usage guidance.
  * @param {Array} allDefs - All tool definitions
  * @param {Object} disabled - Disabled tools map
@@ -530,6 +545,9 @@ export async function registerTools() {
         if (CONFIRMABLE_TOOLS.has(name) && confirmTools[name]) {
             registrationDef.action = wrapWithConfirmation(registrationDef.action, registrationDef.displayName || name);
         }
+
+        // Wrap action to fire a live feed item the instant the tool is invoked
+        registrationDef.action = wrapWithLiveFeed(registrationDef.action, name);
 
         try {
             ToolManager.registerFunctionTool(registrationDef);

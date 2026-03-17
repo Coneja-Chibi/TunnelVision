@@ -1,1072 +1,364 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>TunnelVision – Hybrid Layout: Mini-Kanban Sidebar + Tree Editor Popup</title>
-    <style>
-        :root {
-            --bg: #1a1a2e;
-            --bg-deep: #12121f;
-            --surface: rgba(255,255,255,0.04);
-            --surface-hover: rgba(255,255,255,0.07);
-            --surface-active: rgba(232,67,147,0.08);
-            --border: rgba(255,255,255,0.08);
-            --border-accent: rgba(232,67,147,0.35);
-            --text: #c8c8d0;
-            --text-dim: #888;
-            --text-bright: #e8e8f0;
-            --pink: #e84393;
-            --salmon: #f0946c;
-            --purple: #6c5ce7;
-            --green: #00b894;
-            --yellow: #fdcb6e;
-            --danger: #e74c3c;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            padding: 30px 40px;
-            line-height: 1.5;
-        }
+<meta charset="UTF-8">
+<title>TunnelVision — Condition UI in Context</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a2e; color: #ccc; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+h1 { color: #00cec9; font-size: 16px; margin-bottom: 6px; }
+.page-desc { color: #888; font-size: 11px; margin-bottom: 24px; }
 
-        .section { margin-bottom: 60px; }
-        .section-header {
-            display: flex; align-items: center; gap: 14px; margin-bottom: 8px;
-        }
-        .section-num {
-            width: 36px; height: 36px; border-radius: 50%;
-            background: linear-gradient(135deg, var(--pink), var(--salmon));
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 700; font-size: 16px; color: white; flex-shrink: 0;
-        }
-        .section-title { font-size: 22px; font-weight: 700; color: var(--text-bright); }
-        .section-desc {
-            color: var(--text-dim); font-size: 13px; margin-bottom: 20px; margin-left: 50px; max-width: 800px; line-height: 1.6;
-        }
-        .tag {
-            display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px;
-            border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 12px;
-        }
-        .tag-sidebar { background: rgba(108,92,231,0.15); border: 1px solid rgba(108,92,231,0.3); color: var(--purple); }
-        .tag-popup { background: rgba(0,184,148,0.15); border: 1px solid rgba(0,184,148,0.3); color: var(--green); }
-        .tag-detail { background: rgba(232,67,147,0.15); border: 1px solid rgba(232,67,147,0.3); color: var(--pink); }
+.design-label { background: #e84393; color: white; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 3px; display: inline-block; margin-bottom: 10px; }
+.design-note { color: #666; font-size: 10px; margin-bottom: 12px; font-style: italic; }
 
-        .callout {
-            margin-top: 16px; padding: 14px 18px;
-            background: rgba(232,67,147,0.06); border: 1px solid rgba(232,67,147,0.2);
-            border-radius: 8px; font-size: 12px; line-height: 1.6;
-        }
-        .callout strong { color: var(--pink); }
-        .callout b { color: var(--text-bright); }
+/* ===== Mock ST Lorebook Entry ===== */
+.wi-entry { background: #2a2a44; border: 1px solid #3a3a5a; border-radius: 6px; margin-bottom: 32px; max-width: 820px; overflow: hidden; }
+.wi-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #232340; border-bottom: 1px solid #3a3a5a; }
+.wi-header .toggle { color: #888; font-size: 12px; }
+.wi-header .kill { color: #55efc4; font-size: 14px; }
+.wi-header .title-input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid #3a3a5a; border-radius: 3px; color: #ddd; padding: 4px 8px; font-size: 12px; }
+.wi-header .status { background: rgba(0,0,0,0.3); border: 1px solid #3a3a5a; border-radius: 3px; color: #55efc4; padding: 2px 6px; font-size: 11px; }
+.wi-header .strat { background: rgba(0,0,0,0.3); border: 1px solid #3a3a5a; border-radius: 3px; color: #74b9ff; padding: 2px 6px; font-size: 11px; }
+.wi-body { padding: 10px 12px; }
 
-        /* ═══════════════════════════════════════════ */
-        /* SECTION 1: Sidebar Panel (Mini-Kanban)     */
-        /* ═══════════════════════════════════════════ */
-        .sidebar-mock {
-            width: 340px;
-            background: var(--bg-deep);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-        .sidebar-header {
-            background: linear-gradient(135deg, var(--pink), var(--salmon));
-            padding: 12px 16px;
-            display: flex; align-items: center; gap: 10px;
-        }
-        .sidebar-header-icon { font-size: 18px; color: white; }
-        .sidebar-header-title { color: white; font-weight: 700; font-size: 14px; flex: 1; }
-        .sidebar-header-sub { color: rgba(255,255,255,0.7); font-size: 11px; }
-        .sidebar-body { padding: 12px; }
+/* Keywords row */
+.kw-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+.kw-col { flex: 1; }
+.kw-col.logic { flex: 0 0 auto; }
+.kw-label { font-size: 10px; color: #b0b0d0; text-align: center; margin-bottom: 4px; }
+.kw-input { background: rgba(0,0,0,0.3); border: 1px solid #3a3a5a; border-radius: 3px; padding: 4px 6px; min-height: 30px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.kw-tag { background: #e84393; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.kw-tag .x { font-size: 8px; cursor: pointer; opacity: 0.7; }
+.kw-logic { background: rgba(0,0,0,0.3); border: 1px solid #3a3a5a; border-radius: 3px; color: #ccc; padding: 4px 6px; font-size: 11px; }
 
-        /* Card inside sidebar */
-        .sb-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            margin-bottom: 10px;
-            overflow: hidden;
-        }
-        .sb-card-head {
-            padding: 8px 12px;
-            display: flex; align-items: center; gap: 8px;
-            font-size: 12px; font-weight: 600; color: var(--text-bright);
-            border-bottom: 1px solid var(--border);
-        }
-        .sb-card-head i { color: var(--pink); font-size: 11px; }
-        .sb-card-body { padding: 10px 12px; }
-        .sb-help { font-size: 10px; color: var(--text-dim); line-height: 1.4; margin-bottom: 8px; }
+/* Settings row */
+.settings-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.setting-col { flex: 1; }
+.setting-col label { font-size: 10px; color: #b0b0d0; display: block; text-align: center; margin-bottom: 3px; }
+.setting-col input, .setting-col select { width: 100%; background: rgba(0,0,0,0.3); border: 1px solid #3a3a5a; border-radius: 3px; color: #ccc; padding: 3px 5px; font-size: 11px; }
 
-        /* Mini-kanban overview */
-        .mini-kanban {
-            display: flex; flex-direction: column; gap: 6px;
-        }
-        .mini-cat {
-            display: flex; align-items: center; gap: 8px;
-            padding: 6px 10px; border-radius: 6px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.05);
-            cursor: default;
-            transition: all 0.12s;
-        }
-        .mini-cat:hover { background: rgba(255,255,255,0.05); }
-        .mini-cat-stripe {
-            width: 3px; height: 22px; border-radius: 2px; flex-shrink: 0;
-        }
-        .mini-cat-info { flex: 1; min-width: 0; }
-        .mini-cat-name { font-size: 12px; font-weight: 600; color: var(--text-bright); }
-        .mini-cat-summary {
-            font-size: 10px; color: var(--text-dim); line-height: 1.3;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .mini-cat-count {
-            font-size: 10px; padding: 1px 6px; background: rgba(255,255,255,0.06);
-            border-radius: 8px; color: var(--text-dim); flex-shrink: 0;
-        }
+/* Content area */
+.content-area { margin-top: 8px; }
+.content-label { font-size: 10px; color: #b0b0d0; margin-bottom: 3px; }
+.content-text { background: rgba(0,0,0,0.2); border: 1px solid #3a3a5a; border-radius: 3px; padding: 8px; font-size: 11px; color: #bbb; min-height: 60px; line-height: 1.5; }
 
-        /* Open editor button */
-        .sb-btn-primary {
-            display: flex; align-items: center; justify-content: center; gap: 6px;
-            width: 100%; padding: 8px; border-radius: 6px;
-            background: linear-gradient(135deg, var(--pink), var(--salmon));
-            border: none; color: white; font-size: 12px; font-weight: 600;
-            cursor: pointer; transition: filter 0.15s;
-        }
-        .sb-btn-primary:hover { filter: brightness(1.1); }
+/* ===== TV Condition Shared Styles ===== */
+.tv-tag { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 10px; font-size: 10px; margin: 1px; }
+.tv-tag.primary { background: rgba(0,184,148,0.15); border: 1px solid rgba(0,184,148,0.4); color: #00cec9; }
+.tv-tag.secondary { background: rgba(108,92,231,0.15); border: 1px solid rgba(108,92,231,0.4); color: #a29bfe; }
+.tv-tag.freeform { background: rgba(253,203,110,0.1); border: 1px solid rgba(253,203,110,0.3); color: #fdcb6e; }
+.tv-tag.chain { background: rgba(0,184,148,0.08); border: 1px dashed rgba(0,184,148,0.45); color: #00cec9; }
+.tv-tag .t { font-weight: 700; text-transform: uppercase; font-size: 9px; }
+.tv-tag .v { opacity: 0.9; }
+.tv-tag .rm { cursor: pointer; opacity: 0.4; font-size: 8px; margin-left: 1px; }
+.tv-tag .rm:hover { opacity: 1; color: #ff6b6b; }
+.tv-tag .sep { color: #00b894; font-weight: 700; margin: 0 2px; font-size: 8px; }
 
-        .sb-status {
-            display: flex; align-items: center; gap: 6px;
-            padding: 6px 10px; border-radius: 6px;
-            background: rgba(0,184,148,0.06); border: 1px solid rgba(0,184,148,0.15);
-            font-size: 10px; color: var(--text-dim);
-        }
-        .sb-status i { color: var(--green); font-size: 10px; }
+.tv-btn { background: rgba(0,184,148,0.12); border: 1px solid rgba(0,184,148,0.35); color: #00cec9;
+    padding: 2px 7px; border-radius: 4px; font-size: 11px; cursor: pointer; font-family: inherit; }
+.tv-btn:hover { background: rgba(0,184,148,0.25); }
+.tv-btn-sm { padding: 1px 5px; font-size: 10px; }
 
-        /* ═══════════════════════════════════════════ */
-        /* SECTION 2: Tree Editor Popup               */
-        /* ═══════════════════════════════════════════ */
-        .popup-mock {
-            background: var(--bg-deep);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-        }
-        .popup-toolbar {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 10px 16px;
-            border-bottom: 1px solid var(--border);
-            background: rgba(0,0,0,0.15);
-        }
-        .popup-toolbar-left {
-            display: flex; align-items: center; gap: 10px;
-        }
-        .popup-title {
-            font-size: 15px; font-weight: 700; color: var(--text-bright);
-            display: flex; align-items: center; gap: 8px;
-        }
-        .popup-title i { color: var(--pink); }
-        .popup-toolbar-right { display: flex; align-items: center; gap: 4px; }
-        .popup-btn {
-            display: inline-flex; align-items: center; gap: 5px;
-            padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
-            background: rgba(0,0,0,0.15); color: var(--text); font-size: 12px;
-            cursor: pointer; transition: all 0.15s;
-        }
-        .popup-btn:hover { background: rgba(0,0,0,0.25); border-color: rgba(232,67,147,0.3); }
-        .popup-btn-icon {
-            display: inline-flex; align-items: center; justify-content: center;
-            width: 30px; height: 30px; border: 1px solid var(--border); border-radius: 6px;
-            background: rgba(0,0,0,0.15); color: var(--text-dim); font-size: 12px;
-            cursor: pointer; transition: all 0.15s;
-        }
-        .popup-btn-icon:hover { color: var(--text); border-color: rgba(232,67,147,0.3); }
-        .popup-btn-danger:hover { border-color: rgba(239,68,68,0.5); color: #ef4444; }
+/* ===== DESIGN A: Button in keyword row, panel below ===== */
+.tv-cond-btn-a { display: inline-flex; align-items: center; gap: 2px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(0,184,148,0.1); border: 1px solid rgba(0,184,148,0.3); color: #00cec9;
+    cursor: pointer; font-size: 11px; align-self: flex-end; margin-bottom: 2px; position: relative; }
+.tv-cond-btn-a:hover { background: rgba(0,184,148,0.2); }
+.tv-cond-btn-a .dot { position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: #00cec9; box-shadow: 0 0 4px rgba(0,206,201,0.6); }
 
-        .popup-search {
-            display: flex; align-items: center; gap: 8px;
-            padding: 8px 16px;
-            border-bottom: 1px solid var(--border);
-            background: rgba(0,0,0,0.1);
-        }
-        .popup-search i { color: var(--text-dim); font-size: 12px; }
-        .popup-search input {
-            flex: 1; background: none; border: none; color: var(--text);
-            font-size: 13px; outline: none;
-        }
+.tv-panel-a { background: rgba(0,184,148,0.04); border: 1px solid rgba(0,184,148,0.2); border-radius: 5px; padding: 8px; margin-bottom: 8px; }
+.tv-panel-a-header { font-size: 10px; color: #00cec9; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 4px; }
+.tv-panel-a-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 6px; }
+.tv-panel-a-add { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+.tv-panel-a-add select, .tv-panel-a-add input { background: rgba(0,0,0,0.25); border: 1px solid #3a3a5a; border-radius: 3px; color: #ccc; padding: 3px 5px; font-size: 10px; }
+.tv-panel-a-add select { width: 95px; }
+.tv-panel-a-add input { flex: 1; min-width: 70px; }
 
-        /* Tree + main split */
-        .popup-body {
-            display: flex; height: 520px;
-        }
+/* ===== DESIGN B: Inline in keywords area ===== */
+.tv-inline-b { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin-top: 4px; padding-top: 4px; border-top: 1px dashed rgba(0,184,148,0.15); }
+.tv-add-inline { display: inline-flex; align-items: center; gap: 2px; padding: 1px 6px; border: 1px dashed rgba(0,184,148,0.35); border-radius: 10px; color: #00cec9; cursor: pointer; font-size: 10px; background: transparent; }
+.tv-add-inline:hover { background: rgba(0,184,148,0.1); border-style: solid; }
 
-        /* Tree sidebar */
-        .tree-sidebar {
-            width: 260px; flex-shrink: 0;
-            border-right: 1px solid var(--border);
-            display: flex; flex-direction: column;
-            overflow: hidden;
-        }
-        .tree-sidebar-header {
-            padding: 8px 12px;
-            font-size: 10px; font-weight: 600; text-transform: uppercase;
-            letter-spacing: 0.5px; color: var(--text-dim);
-            border-bottom: 1px solid var(--border);
-            display: flex; align-items: center; justify-content: space-between;
-        }
-        .tree-sidebar-scroll {
-            flex: 1; overflow-y: auto; padding: 6px;
-            scrollbar-width: thin;
-        }
-        .tree-node { user-select: none; }
-        .tree-row {
-            display: flex; align-items: center; gap: 4px;
-            padding: 4px 6px; border-radius: 5px;
-            cursor: pointer; transition: all 0.1s;
-            font-size: 12px; position: relative;
-        }
-        .tree-row:hover { background: var(--surface-hover); }
-        .tree-row.active {
-            background: var(--surface-active);
-            outline: 1px solid rgba(232,67,147,0.25);
-        }
-        .tree-toggle {
-            width: 14px; text-align: center; font-size: 8px; color: var(--text-dim);
-            flex-shrink: 0; transition: transform 0.15s;
-        }
-        .tree-dot {
-            width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
-        }
-        .tree-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .tree-count {
-            font-size: 9px; color: var(--text-dim); flex-shrink: 0;
-            padding: 0 4px; background: rgba(255,255,255,0.04); border-radius: 6px;
-        }
-        .tree-children {
-            padding-left: 14px; margin-left: 7px;
-            border-left: 1px solid rgba(255,255,255,0.04);
-        }
-        .tree-row-drop-target {
-            outline: 1px dashed rgba(240,148,108,0.5) !important;
-            background: rgba(240,148,108,0.05) !important;
-        }
+/* ===== DESIGN C: Sidebar strip ===== */
+.tv-strip-c { display: flex; align-items: flex-start; gap: 0; }
+.tv-strip-c .wi-main { flex: 1; }
+.tv-strip-c .tv-sidebar { width: 140px; background: rgba(0,184,148,0.04); border-left: 2px solid rgba(0,184,148,0.25); padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.tv-sidebar-label { font-size: 9px; color: #00b894; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-bottom: 2px; }
+.tv-sidebar-item { display: flex; align-items: center; gap: 3px; font-size: 10px; padding: 2px 4px; background: rgba(0,0,0,0.15); border-radius: 3px; }
+.tv-sidebar-item .t { color: #00cec9; font-weight: 700; font-size: 9px; text-transform: uppercase; }
+.tv-sidebar-item .v { color: #ddd; }
+.tv-sidebar-item.s .t { color: #a29bfe; }
+.tv-sidebar-item.ff { color: #fdcb6e; font-style: italic; font-size: 9px; }
+.tv-sidebar-item .rm { margin-left: auto; cursor: pointer; opacity: 0.3; font-size: 8px; }
+.tv-sidebar-add { margin-top: 2px; }
+.tv-sidebar-add select, .tv-sidebar-add input { width: 100%; background: rgba(0,0,0,0.25); border: 1px solid #3a3a5a; border-radius: 2px; color: #ccc; padding: 2px 4px; font-size: 9px; margin-bottom: 2px; }
 
-        /* Main content panel */
-        .main-panel {
-            flex: 1; display: flex; flex-direction: column;
-            overflow: hidden;
-        }
-        .main-header {
-            padding: 14px 20px 10px;
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-        .main-title-row {
-            display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
-        }
-        .main-title {
-            font-size: 17px; font-weight: 700; color: var(--text-bright); flex: 1;
-        }
-        .main-title-actions { display: flex; gap: 4px; }
-        .main-breadcrumb {
-            display: flex; align-items: center; gap: 4px;
-            font-size: 11px; color: var(--text-dim);
-        }
-        .main-breadcrumb .crumb { color: var(--text); cursor: pointer; }
-        .main-breadcrumb .crumb:hover { color: var(--pink); }
-        .main-breadcrumb .sep { opacity: 0.4; font-size: 9px; }
-
-        .main-body {
-            flex: 1; overflow-y: auto; padding: 14px 20px;
-            scrollbar-width: thin;
-        }
-
-        /* Node summary */
-        .node-summary {
-            background: rgba(108,92,231,0.06);
-            border: 1px solid rgba(108,92,231,0.15);
-            border-radius: 8px; padding: 10px 14px;
-            margin-bottom: 16px;
-        }
-        .node-summary-label {
-            font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
-            color: var(--purple); font-weight: 600; margin-bottom: 4px;
-        }
-        .node-summary-text { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-
-        /* Entry list */
-        .entry-section-title {
-            font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-            color: var(--text-dim); font-weight: 600; margin-bottom: 8px;
-            display: flex; align-items: center; gap: 6px;
-        }
-        .entry-section-title .count { font-weight: 400; }
-        .entry-list { display: flex; flex-direction: column; gap: 3px; margin-bottom: 16px; }
-        .entry-row {
-            display: flex; align-items: center; gap: 8px;
-            padding: 7px 12px; border-radius: 6px;
-            background: var(--surface); border: 1px solid var(--border);
-            cursor: pointer; transition: all 0.12s;
-        }
-        .entry-row:hover {
-            border-color: rgba(232,67,147,0.25);
-            background: rgba(232,67,147,0.04);
-        }
-        .entry-row.selected {
-            border-color: var(--pink);
-            background: rgba(232,67,147,0.08);
-        }
-        .entry-drag { color: var(--text-dim); font-size: 11px; cursor: grab; flex-shrink: 0; opacity: 0.5; }
-        .entry-row:hover .entry-drag { opacity: 1; }
-        .entry-name { flex: 1; font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .entry-uid { font-size: 10px; color: var(--text-dim); font-family: monospace; flex-shrink: 0; }
-
-        /* Child nodes as cards */
-        .child-cards { display: flex; flex-direction: column; gap: 4px; }
-        .child-card {
-            display: flex; align-items: center; gap: 8px;
-            padding: 8px 12px; border-radius: 6px;
-            background: rgba(108,92,231,0.04);
-            border: 1px solid rgba(108,92,231,0.1);
-            cursor: pointer; transition: all 0.12s;
-        }
-        .child-card:hover { border-color: rgba(108,92,231,0.3); background: rgba(108,92,231,0.07); }
-        .child-card-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-        .child-card-info { flex: 1; min-width: 0; }
-        .child-card-name { font-size: 12px; font-weight: 600; }
-        .child-card-summary { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .child-card-count { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
-        .child-card-arrow { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
-
-        /* ═══════════════════════════════════════════ */
-        /* SECTION 3: Entry Detail Panel              */
-        /* ═══════════════════════════════════════════ */
-        .detail-panel {
-            width: 300px; flex-shrink: 0;
-            border-left: 1px solid var(--border);
-            display: flex; flex-direction: column;
-            overflow: hidden;
-            background: rgba(0,0,0,0.08);
-        }
-        .detail-header {
-            padding: 12px 16px;
-            display: flex; align-items: center; gap: 8px;
-            border-bottom: 1px solid var(--border);
-        }
-        .detail-title { font-size: 14px; font-weight: 700; color: var(--text-bright); flex: 1; }
-        .detail-close {
-            width: 24px; height: 24px; border-radius: 6px;
-            background: rgba(255,255,255,0.06); border: none;
-            color: var(--text-dim); cursor: pointer; font-size: 11px;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .detail-body {
-            flex: 1; overflow-y: auto; padding: 14px 16px;
-            display: flex; flex-direction: column; gap: 14px;
-            scrollbar-width: thin;
-        }
-        .detail-field { display: flex; flex-direction: column; gap: 4px; }
-        .detail-label {
-            font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
-            color: var(--text-dim); font-weight: 600;
-        }
-        .detail-value { font-size: 12px; color: var(--text); line-height: 1.5; }
-        .detail-content {
-            font-size: 12px; color: var(--text); line-height: 1.6;
-            background: rgba(255,255,255,0.03); border-radius: 6px;
-            padding: 10px; border: 1px solid var(--border);
-            max-height: 180px; overflow-y: auto;
-        }
-        .detail-keys { display: flex; gap: 4px; flex-wrap: wrap; }
-        .detail-key-tag {
-            font-size: 10px; padding: 2px 6px; border-radius: 4px;
-            background: rgba(232,67,147,0.1); border: 1px solid rgba(232,67,147,0.2);
-            color: var(--pink);
-        }
-        .detail-node-box {
-            background: rgba(108,92,231,0.06);
-            border: 1px solid rgba(108,92,231,0.15);
-            border-radius: 6px; padding: 8px 10px;
-        }
-        .detail-node-label {
-            font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
-            color: var(--purple); font-weight: 600; margin-bottom: 3px;
-        }
-        .detail-node-text { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
-
-        /* Layouts */
-        .side-by-side { display: flex; gap: 30px; align-items: flex-start; flex-wrap: wrap; }
-        .annotation {
-            font-size: 11px; color: var(--text-dim); margin-top: 8px;
-            padding: 8px 12px; border-left: 2px solid var(--pink); background: rgba(232,67,147,0.03);
-        }
-    </style>
+</style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<!-- OVERVIEW                                                       -->
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<div class="section">
-    <div class="section-header">
-        <div class="section-num">0</div>
-        <div class="section-title">Hybrid Layout Overview</div>
+<h1><i class="fa-solid fa-bolt"></i> Condition UI — In Context</h1>
+<p class="page-desc">Each design shows how the condition panel fits into an actual ST lorebook entry.</p>
+
+<!-- ================================================================ -->
+<!-- DESIGN A: ⚡ button at end of keyword row, collapsible panel below -->
+<!-- ================================================================ -->
+<span class="design-label">Design A — Button + Collapsible Panel Below</span>
+<div class="design-note">⚡ button sits at the end of the keywords row. Teal dot = has conditions. Click opens panel between keywords and settings.</div>
+
+<div class="wi-entry">
+    <div class="wi-header">
+        <span class="toggle"><i class="fa-solid fa-circle-chevron-down"></i></span>
+        <span class="kill"><i class="fa-solid fa-toggle-on"></i></span>
+        <input class="title-input" value="Velverra Kingdom Overview">
+        <span class="strat"><i class="fa-solid fa-circle"></i></span>
+        <span class="status">↑Char</span>
     </div>
-    <div class="section-desc">
-        <b style="color:var(--text-bright)">Two roles, two layouts.</b><br>
-        The ST sidebar panel stays compact with a <b>mini-kanban overview</b> — you can glance at your tree structure without opening anything.
-        The full <b>tree editor popup</b> opens when you click "Open Tree Editor" and uses a file-explorer tree for unlimited depth navigation, drag-and-drop, and entry detail inspection.
-        <br><br>
-        Scroll down to see each piece in context, then the full popup with an entry detail panel open.
+    <div class="wi-body">
+        <div class="kw-row">
+            <div class="kw-col">
+                <div class="kw-label">Primary Keywords</div>
+                <div class="kw-input">
+                    <span class="kw-tag"><span class="x">✕</span> /\bVelverra\b/i</span>
+                    <span class="kw-tag"><span class="x">✕</span> /\bthe\s+kingdom\b/i</span>
+                </div>
+            </div>
+            <div class="kw-col logic">
+                <div class="kw-label">Logic</div>
+                <select class="kw-logic"><option>AND ANY</option></select>
+            </div>
+            <div class="kw-col">
+                <div class="kw-label">Optional Filter</div>
+                <div class="kw-input">
+                    <span class="kw-tag"><span class="x">✕</span> guild</span>
+                    <span class="kw-tag"><span class="x">✕</span> adventure</span>
+                </div>
+            </div>
+            <!-- THE BUTTON -->
+            <div style="align-self: flex-end; margin-bottom: 2px;">
+                <button class="tv-cond-btn-a" onclick="this.closest('.wi-body').querySelector('.tv-panel-a').style.display = this.closest('.wi-body').querySelector('.tv-panel-a').style.display === 'none' ? 'block' : 'none'">
+                    <i class="fa-solid fa-bolt" style="font-size:10px"></i><i class="fa-solid fa-plus" style="font-size:7px"></i>
+                    <span class="dot"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- CONDITION PANEL (toggles open) -->
+        <div class="tv-panel-a">
+            <div class="tv-panel-a-header"><i class="fa-solid fa-bolt"></i> Narrative Conditions</div>
+            <div class="tv-panel-a-tags">
+                <span class="tv-tag primary"><span class="t">Mood</span>:<span class="v">tense</span> <i class="fa-solid fa-xmark rm"></i></span>
+                <span class="tv-tag primary"><span class="t">Location</span>:<span class="v">castle</span> <i class="fa-solid fa-xmark rm"></i></span>
+                <span class="tv-tag secondary"><span class="t">Weather</span>:<span class="v">storm</span> <i class="fa-solid fa-xmark rm"></i></span>
+                <span class="tv-tag chain"><span class="t">Mood</span>:<span class="v">romantic</span> <span class="sep">+</span> <span class="t">Time</span>:<span class="v">evening</span> <i class="fa-solid fa-xmark rm"></i></span>
+                <span class="tv-tag freeform"><i class="fa-solid fa-pen-fancy" style="font-size:8px"></i> <span class="v">Fire when nostalgic about home</span> <i class="fa-solid fa-xmark rm"></i></span>
+            </div>
+            <div class="tv-panel-a-add">
+                <select><option>Emotion</option><option>Mood</option><option>Time of Day</option><option>Location</option><option>Weather</option><option>Activity</option><option>Relationship</option><option>Freeform</option></select>
+                <input type="text" placeholder="value...">
+                <select style="width:40px"><option>P</option><option>S</option></select>
+                <button class="tv-btn tv-btn-sm"><i class="fa-solid fa-plus"></i></button>
+            </div>
+        </div>
+
+        <div class="settings-row">
+            <div class="setting-col"><label>Scan Depth</label><input type="number" value="2"></div>
+            <div class="setting-col"><label>Case-Sensitive</label><select><option>Use global</option></select></div>
+            <div class="setting-col"><label>Whole Words</label><select><option>Use global</option></select></div>
+            <div class="setting-col"><label>Group Scoring</label><select><option>Use global</option></select></div>
+        </div>
+        <div class="content-area">
+            <div class="content-label">Content 📝 (Tokens: 253)</div>
+            <div class="content-text">Velverra stands as a unique kingdom where medieval traditions blend with magical innovation through the Guild Council system...</div>
+        </div>
     </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<!-- SECTION 1: Sidebar Mini-Kanban                                 -->
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<div class="section">
-    <div class="section-header">
-        <div class="section-num">1</div>
-        <div class="section-title">Sidebar Panel: Mini-Kanban Overview</div>
-        <span class="tag tag-sidebar">Sidebar</span>
-    </div>
-    <div class="section-desc">
-        Replaces the current "Open Tree Editor" button + status text with a compact read-only overview of all categories.
-        Shows each top-level category as a row with its name, entry count, and truncated summary.
-        One click opens the full tree editor popup. No editing here — just orientation.
-    </div>
+<!-- ================================================================ -->
+<!-- DESIGN B: Conditions mixed inline with keywords -->
+<!-- ================================================================ -->
+<span class="design-label">Design B — Inline Under Keywords</span>
+<div class="design-note">Condition tags appear directly under the keyword inputs, separated by a dashed line. "+ Condition" button inline.</div>
 
-    <div class="sidebar-mock">
-        <div class="sidebar-header">
-            <span class="sidebar-header-icon">&#128391;</span>
-            <div style="flex:1">
-                <div class="sidebar-header-title">TunnelVision</div>
-                <div class="sidebar-header-sub">Reasoning-based lorebook retrieval</div>
-            </div>
-        </div>
-        <div class="sidebar-body">
-            <!-- Tree Overview card (replaces old Tree Editor card) -->
-            <div class="sb-card">
-                <div class="sb-card-head">
-                    <i>&#128194;</i>
-                    <span style="flex:1">Tree Overview</span>
-                    <span style="font-size:10px; color:var(--text-dim); font-weight:400;">5 categories &middot; 33 entries</span>
+<div class="wi-entry">
+    <div class="wi-header">
+        <span class="toggle"><i class="fa-solid fa-circle-chevron-down"></i></span>
+        <span class="kill"><i class="fa-solid fa-toggle-on"></i></span>
+        <input class="title-input" value="Velverra Kingdom Overview">
+        <span class="strat"><i class="fa-solid fa-circle"></i></span>
+        <span class="status">↑Char</span>
+    </div>
+    <div class="wi-body">
+        <div class="kw-row">
+            <div class="kw-col">
+                <div class="kw-label">Primary Keywords</div>
+                <div class="kw-input">
+                    <span class="kw-tag"><span class="x">✕</span> /\bVelverra\b/i</span>
+                    <span class="kw-tag"><span class="x">✕</span> /\bthe\s+kingdom\b/i</span>
                 </div>
-                <div class="sb-card-body">
-                    <div class="mini-kanban">
-                        <div class="mini-cat">
-                            <div class="mini-cat-stripe" style="background:var(--pink)"></div>
-                            <div class="mini-cat-info">
-                                <div class="mini-cat-name">Characters</div>
-                                <div class="mini-cat-summary">Main cast, NPCs, and character relationships</div>
-                            </div>
-                            <div class="mini-cat-count">16</div>
-                        </div>
-                        <div class="mini-cat">
-                            <div class="mini-cat-stripe" style="background:var(--salmon)"></div>
-                            <div class="mini-cat-info">
-                                <div class="mini-cat-name">Locations</div>
-                                <div class="mini-cat-summary">Places, dungeons, and geographic regions</div>
-                            </div>
-                            <div class="mini-cat-count">8</div>
-                        </div>
-                        <div class="mini-cat">
-                            <div class="mini-cat-stripe" style="background:var(--purple)"></div>
-                            <div class="mini-cat-info">
-                                <div class="mini-cat-name">Magic System</div>
-                                <div class="mini-cat-summary">Spells, enchantments, and arcane rules</div>
-                            </div>
-                            <div class="mini-cat-count">6</div>
-                        </div>
-                        <div class="mini-cat">
-                            <div class="mini-cat-stripe" style="background:var(--green)"></div>
-                            <div class="mini-cat-info">
-                                <div class="mini-cat-name">Events</div>
-                                <div class="mini-cat-summary">Timeline events, wars, turning points</div>
-                            </div>
-                            <div class="mini-cat-count">5</div>
-                        </div>
-                        <div class="mini-cat">
-                            <div class="mini-cat-stripe" style="background:var(--yellow)"></div>
-                            <div class="mini-cat-info">
-                                <div class="mini-cat-name">Items</div>
-                                <div class="mini-cat-summary">Weapons, relics, and key objects</div>
-                            </div>
-                            <div class="mini-cat-count">4</div>
-                        </div>
-                    </div>
-                    <div style="margin-top:10px;">
-                        <button class="sb-btn-primary">
-                            &#128736; Open Tree Editor
-                        </button>
-                    </div>
-                    <div class="sb-status" style="margin-top:8px;">
-                        <i>&#10003;</i>
-                        <span>Last built: Mar 5, 2026 2:15 PM</span>
-                    </div>
+                <!-- Conditions inline under primary -->
+                <div class="tv-inline-b">
+                    <span class="tv-tag primary"><span class="t">Mood</span>:<span class="v">tense</span> <i class="fa-solid fa-xmark rm"></i></span>
+                    <span class="tv-tag primary"><span class="t">Location</span>:<span class="v">castle</span> <i class="fa-solid fa-xmark rm"></i></span>
+                    <span class="tv-tag freeform"><i class="fa-solid fa-pen-fancy" style="font-size:8px"></i> <span class="v">Nostalgic</span> <i class="fa-solid fa-xmark rm"></i></span>
+                    <button class="tv-add-inline"><i class="fa-solid fa-bolt" style="font-size:8px"></i> <i class="fa-solid fa-plus" style="font-size:7px"></i></button>
                 </div>
             </div>
-
-            <!-- Unassigned entries (unchanged from current) -->
-            <div class="sb-card">
-                <div class="sb-card-head">
-                    <i>&#128229;</i>
-                    <span style="flex:1">Unassigned</span>
-                    <span style="font-size:10px; color:var(--yellow); font-weight:400;">2</span>
+            <div class="kw-col logic">
+                <div class="kw-label">Logic</div>
+                <select class="kw-logic"><option>AND ANY</option></select>
+            </div>
+            <div class="kw-col">
+                <div class="kw-label">Optional Filter</div>
+                <div class="kw-input">
+                    <span class="kw-tag"><span class="x">✕</span> guild</span>
+                    <span class="kw-tag"><span class="x">✕</span> adventure</span>
                 </div>
-                <div class="sb-card-body">
-                    <div class="sb-help">These entries aren't in the tree. Open the editor to assign them.</div>
-                    <div style="display:flex; flex-direction:column; gap:3px;">
-                        <div style="padding:4px 8px; border-radius:4px; background:rgba(253,203,110,0.06); border:1px solid rgba(253,203,110,0.15); font-size:11px; color:var(--text);">New Prophecy Fragment</div>
-                        <div style="padding:4px 8px; border-radius:4px; background:rgba(253,203,110,0.06); border:1px solid rgba(253,203,110,0.15); font-size:11px; color:var(--text);">Ashford Trade Routes</div>
-                    </div>
+                <!-- Conditions inline under secondary -->
+                <div class="tv-inline-b">
+                    <span class="tv-tag secondary"><span class="t">Weather</span>:<span class="v">storm</span> <i class="fa-solid fa-xmark rm"></i></span>
+                    <button class="tv-add-inline" style="border-color:rgba(108,92,231,0.35);color:#a29bfe"><i class="fa-solid fa-bolt" style="font-size:8px"></i> <i class="fa-solid fa-plus" style="font-size:7px"></i></button>
                 </div>
             </div>
         </div>
-    </div>
-    <div class="annotation">
-        The mini-kanban is <b>read-only</b>. It's built from the same tree data with one loop over <code>tree.root.children</code>.
-        No drag-and-drop, no editing — just a visual summary. The real work happens in the popup.
+
+        <div class="settings-row">
+            <div class="setting-col"><label>Scan Depth</label><input type="number" value="2"></div>
+            <div class="setting-col"><label>Case-Sensitive</label><select><option>Use global</option></select></div>
+            <div class="setting-col"><label>Whole Words</label><select><option>Use global</option></select></div>
+            <div class="setting-col"><label>Group Scoring</label><select><option>Use global</option></select></div>
+        </div>
+        <div class="content-area">
+            <div class="content-label">Content 📝 (Tokens: 253)</div>
+            <div class="content-text">Velverra stands as a unique kingdom where medieval traditions blend with magical innovation...</div>
+        </div>
     </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<!-- SECTION 2: Tree Editor Popup                                   -->
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<div class="section">
-    <div class="section-header">
-        <div class="section-num">2</div>
-        <div class="section-title">Tree Editor Popup: Navigating Deep Nodes</div>
-        <span class="tag tag-popup">Popup</span>
+<!-- ================================================================ -->
+<!-- DESIGN C: Sidebar strip on right side of entry -->
+<!-- ================================================================ -->
+<span class="design-label">Design C — Right Sidebar Strip</span>
+<div class="design-note">Thin teal sidebar on the right edge of the entry. Always visible, doesn't push content around.</div>
+
+<div class="wi-entry">
+    <div class="wi-header">
+        <span class="toggle"><i class="fa-solid fa-circle-chevron-down"></i></span>
+        <span class="kill"><i class="fa-solid fa-toggle-on"></i></span>
+        <input class="title-input" value="Velverra Kingdom Overview">
+        <span class="strat"><i class="fa-solid fa-circle"></i></span>
+        <span class="status">↑Char</span>
     </div>
-    <div class="section-desc">
-        The full editor uses a file-explorer tree on the left and a content panel on the right.
-        Here the user has navigated to <b>Characters &gt; NPCs &gt; Tavern Staff</b> — a depth-3 node that was invisible in the old kanban.
-        The node summary, direct entries, and child nodes are all visible. Drag entries from the list to any node in the tree.
-    </div>
-
-    <div class="popup-mock">
-        <!-- Toolbar (same as current) -->
-        <div class="popup-toolbar">
-            <div class="popup-toolbar-left">
-                <span class="popup-title"><i>&#128194;</i> My Fantasy Lorebook</span>
-            </div>
-            <div class="popup-toolbar-right">
-                <button class="popup-btn"><i>&#128193;+</i> Add Category</button>
-                <button class="popup-btn"><i>&#128260;</i> Regen Summaries</button>
-                <button class="popup-btn-icon" title="Export">&#128228;</button>
-                <button class="popup-btn-icon" title="Import">&#128229;</button>
-                <button class="popup-btn-icon popup-btn-danger" title="Delete">&#128465;</button>
-            </div>
-        </div>
-
-        <!-- Search bar -->
-        <div class="popup-search">
-            <i>&#128269;</i>
-            <input type="text" placeholder="Search categories and entries..." />
-        </div>
-
-        <!-- Body: tree + main panel -->
-        <div class="popup-body">
-            <!-- Tree sidebar -->
-            <div class="tree-sidebar">
-                <div class="tree-sidebar-header">
-                    <span>Tree</span>
-                    <span style="font-size:9px; color:var(--text-dim)">33 entries</span>
-                </div>
-                <div class="tree-sidebar-scroll">
-                    <!-- Characters (expanded) -->
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9660;</span>
-                            <span class="tree-dot" style="background:var(--pink)"></span>
-                            <span class="tree-label" style="font-weight:600">Characters</span>
-                            <span class="tree-count">16</span>
-                        </div>
-                        <div class="tree-children">
-                            <div class="tree-node">
-                                <div class="tree-row">
-                                    <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                                    <span class="tree-dot" style="background:var(--purple)"></span>
-                                    <span class="tree-label">Relationships</span>
-                                    <span class="tree-count">4</span>
-                                </div>
-                            </div>
-                            <!-- NPCs (expanded) -->
-                            <div class="tree-node">
-                                <div class="tree-row">
-                                    <span class="tree-toggle">&#9660;</span>
-                                    <span class="tree-dot" style="background:var(--purple)"></span>
-                                    <span class="tree-label">NPCs</span>
-                                    <span class="tree-count">7</span>
-                                </div>
-                                <div class="tree-children">
-                                    <!-- Tavern Staff (active — depth 3) -->
-                                    <div class="tree-node">
-                                        <div class="tree-row active">
-                                            <span class="tree-toggle">&#9660;</span>
-                                            <span class="tree-dot" style="background:var(--green)"></span>
-                                            <span class="tree-label" style="font-weight:600">Tavern Staff</span>
-                                            <span class="tree-count">3</span>
-                                        </div>
-                                        <div class="tree-children">
-                                            <!-- Kitchen (depth 4!) -->
-                                            <div class="tree-node">
-                                                <div class="tree-row">
-                                                    <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                                                    <span class="tree-dot" style="background:var(--yellow)"></span>
-                                                    <span class="tree-label">Kitchen</span>
-                                                    <span class="tree-count">2</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <!-- Guard NPCs -->
-                                    <div class="tree-node">
-                                        <div class="tree-row">
-                                            <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                                            <span class="tree-dot" style="background:var(--green)"></span>
-                                            <span class="tree-label">Guard NPCs</span>
-                                            <span class="tree-count">2</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+    <div class="tv-strip-c">
+        <div class="wi-main">
+            <div class="wi-body">
+                <div class="kw-row">
+                    <div class="kw-col">
+                        <div class="kw-label">Primary Keywords</div>
+                        <div class="kw-input">
+                            <span class="kw-tag"><span class="x">✕</span> /\bVelverra\b/i</span>
+                            <span class="kw-tag"><span class="x">✕</span> /\bthe\s+kingdom\b/i</span>
                         </div>
                     </div>
-                    <!-- Locations (collapsed) -->
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--salmon)"></span>
-                            <span class="tree-label">Locations</span>
-                            <span class="tree-count">8</span>
-                        </div>
+                    <div class="kw-col logic">
+                        <div class="kw-label">Logic</div>
+                        <select class="kw-logic"><option>AND ANY</option></select>
                     </div>
-                    <!-- Magic System (collapsed) -->
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--purple)"></span>
-                            <span class="tree-label">Magic System</span>
-                            <span class="tree-count">6</span>
-                        </div>
-                    </div>
-                    <!-- Events (collapsed) -->
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--green)"></span>
-                            <span class="tree-label">Events</span>
-                            <span class="tree-count">5</span>
-                        </div>
-                    </div>
-                    <!-- Items (collapsed) -->
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--yellow)"></span>
-                            <span class="tree-label">Items</span>
-                            <span class="tree-count">4</span>
-                        </div>
-                    </div>
-                    <!-- Unassigned -->
-                    <div class="tree-node" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);">
-                        <div class="tree-row">
-                            <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--text-dim); opacity:0.5"></span>
-                            <span class="tree-label" style="color:var(--text-dim)">Unassigned</span>
-                            <span class="tree-count" style="color:var(--yellow)">2</span>
+                    <div class="kw-col">
+                        <div class="kw-label">Optional Filter</div>
+                        <div class="kw-input">
+                            <span class="kw-tag"><span class="x">✕</span> guild</span>
+                            <span class="kw-tag"><span class="x">✕</span> adventure</span>
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Main panel — showing Tavern Staff (depth 3) -->
-            <div class="main-panel">
-                <div class="main-header">
-                    <div class="main-breadcrumb">
-                        <span class="crumb">Root</span> <span class="sep">&#9656;</span>
-                        <span class="crumb">Characters</span> <span class="sep">&#9656;</span>
-                        <span class="crumb">NPCs</span> <span class="sep">&#9656;</span>
-                        <span style="color:var(--text-bright); font-weight:600">Tavern Staff</span>
-                    </div>
-                    <div class="main-title-row">
-                        <div class="main-title">Tavern Staff</div>
-                        <div class="main-title-actions">
-                            <button class="popup-btn-icon" title="Rename">&#9998;</button>
-                            <button class="popup-btn-icon popup-btn-danger" title="Delete node">&#128465;</button>
-                        </div>
-                    </div>
+                <div class="settings-row">
+                    <div class="setting-col"><label>Scan Depth</label><input type="number" value="2"></div>
+                    <div class="setting-col"><label>Case-Sensitive</label><select><option>Use global</option></select></div>
+                    <div class="setting-col"><label>Whole Words</label><select><option>Use global</option></select></div>
+                    <div class="setting-col"><label>Group Scoring</label><select><option>Use global</option></select></div>
                 </div>
-                <div class="main-body">
-                    <!-- Node summary -->
-                    <div class="node-summary">
-                        <div class="node-summary-label">Node Summary</div>
-                        <div class="node-summary-text">
-                            NPCs who work at Brell's Tavern in Thornwall City. They serve as recurring background characters, information sources, and occasional quest-givers. Brell is the owner and primary contact; Sal runs the attached shop.
-                        </div>
-                    </div>
-
-                    <!-- Entries -->
-                    <div class="entry-section-title">
-                        Direct Entries <span class="count">(3)</span>
-                    </div>
-                    <div class="entry-list">
-                        <div class="entry-row">
-                            <span class="entry-drag">&#8942;&#8942;</span>
-                            <span class="entry-name">Innkeeper Brell</span>
-                            <span class="entry-uid">#67</span>
-                        </div>
-                        <div class="entry-row">
-                            <span class="entry-drag">&#8942;&#8942;</span>
-                            <span class="entry-name">Merchant Sal</span>
-                            <span class="entry-uid">#71</span>
-                        </div>
-                        <div class="entry-row">
-                            <span class="entry-drag">&#8942;&#8942;</span>
-                            <span class="entry-name">Barmaid Lira</span>
-                            <span class="entry-uid">#84</span>
-                        </div>
-                    </div>
-
-                    <!-- Child nodes -->
-                    <div class="entry-section-title">
-                        Sub-categories <span class="count">(1)</span>
-                    </div>
-                    <div class="child-cards">
-                        <div class="child-card">
-                            <div class="child-card-dot" style="background:var(--yellow)"></div>
-                            <div class="child-card-info">
-                                <div class="child-card-name">Kitchen</div>
-                                <div class="child-card-summary">Back-of-house staff: Cook Marta and Pot Boy Fen</div>
-                            </div>
-                            <span class="child-card-count">2</span>
-                            <span class="child-card-arrow">&#9656;</span>
-                        </div>
-                    </div>
+                <div class="content-area">
+                    <div class="content-label">Content 📝 (Tokens: 253)</div>
+                    <div class="content-text">Velverra stands as a unique kingdom where medieval traditions blend...</div>
                 </div>
             </div>
         </div>
-    </div>
-    <div class="annotation">
-        Depth 3 (<b>Tavern Staff</b>) and depth 4 (<b>Kitchen</b>) are fully visible and editable.
-        The tree sidebar handles this naturally via recursion — no hardcoded depth limit.
-        Clicking "Kitchen" would navigate there, showing its entries and the node summary.
+        <div class="tv-sidebar">
+            <div class="tv-sidebar-label"><i class="fa-solid fa-bolt"></i> Conditions</div>
+            <div class="tv-sidebar-item"><span class="t">Mood</span> <span class="v">tense</span> <i class="fa-solid fa-xmark rm"></i></div>
+            <div class="tv-sidebar-item"><span class="t">Loc</span> <span class="v">castle</span> <i class="fa-solid fa-xmark rm"></i></div>
+            <div class="tv-sidebar-item s"><span class="t">Weath</span> <span class="v">storm</span> <i class="fa-solid fa-xmark rm"></i></div>
+            <div class="tv-sidebar-item ff"><i class="fa-solid fa-pen-fancy" style="font-size:7px"></i> Nostalgic about home <i class="fa-solid fa-xmark rm"></i></div>
+            <div class="tv-sidebar-add">
+                <select><option>Mood</option><option>Emotion</option><option>Location</option><option>Weather</option><option>Time of Day</option><option>Activity</option><option>Relationship</option><option>Freeform</option></select>
+                <input type="text" placeholder="value...">
+                <button class="tv-btn tv-btn-sm" style="width:100%;margin-top:1px"><i class="fa-solid fa-plus"></i></button>
+            </div>
+        </div>
     </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<!-- SECTION 3: Entry Detail Panel Open                             -->
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<div class="section">
-    <div class="section-header">
-        <div class="section-num">3</div>
-        <div class="section-title">Entry Detail: Click to Inspect</div>
-        <span class="tag tag-detail">Detail Panel</span>
+<!-- ================================================================ -->
+<!-- DESIGN D: Floating pill bar between keywords and settings -->
+<!-- ================================================================ -->
+<span class="design-label">Design D — Pill Bar Between Rows</span>
+<div class="design-note">A compact single-line bar between keywords and settings. Tags scroll horizontally. Click the + to get a mini add popup.</div>
+
+<div class="wi-entry">
+    <div class="wi-header">
+        <span class="toggle"><i class="fa-solid fa-circle-chevron-down"></i></span>
+        <span class="kill"><i class="fa-solid fa-toggle-on"></i></span>
+        <input class="title-input" value="Velverra Kingdom Overview">
+        <span class="strat"><i class="fa-solid fa-circle"></i></span>
+        <span class="status">↑Char</span>
     </div>
-    <div class="section-desc">
-        Clicking any entry in the list opens a detail panel on the right. Shows the full entry content, keys, UID,
-        tree location breadcrumb, and the <b>parent node's summary</b> explaining why this entry lives where it does.
-        The panel slides in from the right — doesn't replace the main view.
-    </div>
-
-    <div class="popup-mock">
-        <div class="popup-toolbar">
-            <div class="popup-toolbar-left">
-                <span class="popup-title"><i>&#128194;</i> My Fantasy Lorebook</span>
-            </div>
-            <div class="popup-toolbar-right">
-                <button class="popup-btn"><i>&#128193;+</i> Add Category</button>
-                <button class="popup-btn"><i>&#128260;</i> Regen Summaries</button>
-                <button class="popup-btn-icon">&#128228;</button>
-                <button class="popup-btn-icon">&#128229;</button>
-                <button class="popup-btn-icon popup-btn-danger">&#128465;</button>
-            </div>
-        </div>
-        <div class="popup-search">
-            <i>&#128269;</i>
-            <input type="text" placeholder="Search categories and entries..." />
-        </div>
-
-        <div class="popup-body">
-            <!-- Tree sidebar (narrower when detail open) -->
-            <div class="tree-sidebar" style="width:220px">
-                <div class="tree-sidebar-header">
-                    <span>Tree</span>
-                </div>
-                <div class="tree-sidebar-scroll">
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9660;</span>
-                            <span class="tree-dot" style="background:var(--pink)"></span>
-                            <span class="tree-label" style="font-weight:600">Characters</span>
-                            <span class="tree-count">16</span>
-                        </div>
-                        <div class="tree-children">
-                            <div class="tree-node">
-                                <div class="tree-row">
-                                    <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                                    <span class="tree-dot" style="background:var(--purple)"></span>
-                                    <span class="tree-label">Relationships</span>
-                                    <span class="tree-count">4</span>
-                                </div>
-                            </div>
-                            <div class="tree-node">
-                                <div class="tree-row active">
-                                    <span class="tree-toggle">&#9660;</span>
-                                    <span class="tree-dot" style="background:var(--purple)"></span>
-                                    <span class="tree-label" style="font-weight:600">NPCs</span>
-                                    <span class="tree-count">7</span>
-                                </div>
-                                <div class="tree-children">
-                                    <div class="tree-node">
-                                        <div class="tree-row">
-                                            <span class="tree-toggle">&#9654;</span>
-                                            <span class="tree-dot" style="background:var(--green)"></span>
-                                            <span class="tree-label">Tavern Staff</span>
-                                            <span class="tree-count">3</span>
-                                        </div>
-                                    </div>
-                                    <div class="tree-node">
-                                        <div class="tree-row">
-                                            <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                                            <span class="tree-dot" style="background:var(--green)"></span>
-                                            <span class="tree-label">Guard NPCs</span>
-                                            <span class="tree-count">2</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--salmon)"></span>
-                            <span class="tree-label">Locations</span>
-                            <span class="tree-count">8</span>
-                        </div>
-                    </div>
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--purple)"></span>
-                            <span class="tree-label">Magic System</span>
-                            <span class="tree-count">6</span>
-                        </div>
-                    </div>
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--green)"></span>
-                            <span class="tree-label">Events</span>
-                            <span class="tree-count">5</span>
-                        </div>
-                    </div>
-                    <div class="tree-node">
-                        <div class="tree-row">
-                            <span class="tree-toggle" style="visibility:hidden">&#9654;</span>
-                            <span class="tree-dot" style="background:var(--yellow)"></span>
-                            <span class="tree-label">Items</span>
-                            <span class="tree-count">4</span>
-                        </div>
-                    </div>
+    <div class="wi-body">
+        <div class="kw-row">
+            <div class="kw-col">
+                <div class="kw-label">Primary Keywords</div>
+                <div class="kw-input">
+                    <span class="kw-tag"><span class="x">✕</span> /\bVelverra\b/i</span>
+                    <span class="kw-tag"><span class="x">✕</span> /\bthe\s+kingdom\b/i</span>
                 </div>
             </div>
-
-            <!-- Main panel — NPCs node selected, The Oracle entry clicked -->
-            <div class="main-panel">
-                <div class="main-header">
-                    <div class="main-breadcrumb">
-                        <span class="crumb">Root</span> <span class="sep">&#9656;</span>
-                        <span class="crumb">Characters</span> <span class="sep">&#9656;</span>
-                        <span style="color:var(--text-bright); font-weight:600">NPCs</span>
-                    </div>
-                    <div class="main-title-row">
-                        <div class="main-title">NPCs</div>
-                    </div>
-                </div>
-                <div class="main-body">
-                    <div class="node-summary">
-                        <div class="node-summary-label">Node Summary</div>
-                        <div class="node-summary-text">
-                            Non-player characters the protagonists interact with regularly. Includes recurring allies, merchants, information brokers, and authority figures across Thornwall and surroundings.
-                        </div>
-                    </div>
-
-                    <div class="entry-section-title">Direct Entries <span class="count">(2)</span></div>
-                    <div class="entry-list">
-                        <div class="entry-row">
-                            <span class="entry-drag">&#8942;&#8942;</span>
-                            <span class="entry-name">Captain Rowe</span>
-                            <span class="entry-uid">#51</span>
-                        </div>
-                        <div class="entry-row selected">
-                            <span class="entry-drag">&#8942;&#8942;</span>
-                            <span class="entry-name">The Oracle</span>
-                            <span class="entry-uid">#55</span>
-                        </div>
-                    </div>
-
-                    <div class="entry-section-title">Sub-categories <span class="count">(2)</span></div>
-                    <div class="child-cards">
-                        <div class="child-card">
-                            <div class="child-card-dot" style="background:var(--green)"></div>
-                            <div class="child-card-info">
-                                <div class="child-card-name">Tavern Staff</div>
-                                <div class="child-card-summary">NPCs at Brell's Tavern: owner, merchant, barmaid</div>
-                            </div>
-                            <span class="child-card-count">3</span>
-                            <span class="child-card-arrow">&#9656;</span>
-                        </div>
-                        <div class="child-card">
-                            <div class="child-card-dot" style="background:var(--green)"></div>
-                            <div class="child-card-info">
-                                <div class="child-card-name">Guard NPCs</div>
-                                <div class="child-card-summary">City watch members and gate sentries</div>
-                            </div>
-                            <span class="child-card-count">2</span>
-                            <span class="child-card-arrow">&#9656;</span>
-                        </div>
-                    </div>
-                </div>
+            <div class="kw-col logic">
+                <div class="kw-label">Logic</div>
+                <select class="kw-logic"><option>AND ANY</option></select>
             </div>
-
-            <!-- Detail panel (entry clicked) -->
-            <div class="detail-panel">
-                <div class="detail-header">
-                    <div class="detail-title">The Oracle</div>
-                    <button class="detail-close">&#10005;</button>
-                </div>
-                <div class="detail-body">
-                    <div class="detail-field">
-                        <div class="detail-label">Location</div>
-                        <div class="main-breadcrumb">
-                            <span>Root</span> <span class="sep">&#9656;</span>
-                            <span>Characters</span> <span class="sep">&#9656;</span>
-                            <span>NPCs</span>
-                        </div>
-                    </div>
-
-                    <div class="detail-node-box">
-                        <div class="detail-node-label">Parent Node Summary (NPCs)</div>
-                        <div class="detail-node-text">
-                            Non-player characters the protagonists interact with regularly. Includes recurring allies, merchants, information brokers, and authority figures.
-                        </div>
-                    </div>
-
-                    <div class="detail-field">
-                        <div class="detail-label">Keys</div>
-                        <div class="detail-keys">
-                            <span class="detail-key-tag">Oracle</span>
-                            <span class="detail-key-tag">seer</span>
-                            <span class="detail-key-tag">prophecy</span>
-                            <span class="detail-key-tag">blind woman</span>
-                        </div>
-                    </div>
-
-                    <div class="detail-field">
-                        <div class="detail-label">Content</div>
-                        <div class="detail-content">
-                            The Oracle is an ancient blind woman who lives in a cave beneath the Crystal Caves. She speaks only in verse and her prophecies are always accurate — but deliberately ambiguous.
-
-She predicted Elena's rise before her birth and warned Marcus about the Shadow King's return twenty years before it happened. Despite her immense knowledge, she refuses to intervene directly, claiming that "the threads must be woven by mortal hands."
-
-She subsists on mushrooms that grow in the cave and seems to not age. Some believe she is an aspect of the World Tree itself. When angry, the cave trembles.
-                        </div>
-                    </div>
-
-                    <div class="detail-field">
-                        <div class="detail-label">UID</div>
-                        <div class="detail-value" style="font-family:monospace; font-size:11px; color:var(--text-dim)">55</div>
-                    </div>
-
-                    <div class="detail-field">
-                        <div class="detail-label">Status</div>
-                        <div class="detail-value" style="font-size:11px; color:var(--green)">&#9679; Enabled</div>
-                    </div>
+            <div class="kw-col">
+                <div class="kw-label">Optional Filter</div>
+                <div class="kw-input">
+                    <span class="kw-tag"><span class="x">✕</span> guild</span>
+                    <span class="kw-tag"><span class="x">✕</span> adventure</span>
                 </div>
             </div>
         </div>
-    </div>
-    <div class="annotation">
-        Three-panel layout: <b>Tree</b> (navigate) &middot; <b>Node</b> (entries + summary) &middot; <b>Detail</b> (entry content).
-        The detail panel slides in when you click an entry and closes with the &times; button.
-        The parent node summary in the detail panel answers "why is this entry here?"
-    </div>
-</div>
 
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<!-- SECTION 4: Interaction Model                                   -->
-<!-- ═══════════════════════════════════════════════════════════════ -->
-<div class="section">
-    <div class="section-header">
-        <div class="section-num">4</div>
-        <div class="section-title">Interaction Summary</div>
-    </div>
-    <div class="section-desc" style="max-width:900px">
-        How each piece works together.
-    </div>
+        <!-- PILL BAR -->
+        <div style="display:flex; align-items:center; gap:4px; padding:4px 6px; background:linear-gradient(90deg, rgba(0,184,148,0.06), transparent); border-left:2px solid rgba(0,184,148,0.4); border-radius:0 4px 4px 0; margin-bottom:8px; overflow-x:auto;">
+            <i class="fa-solid fa-bolt" style="font-size:9px;color:#00b894;flex-shrink:0"></i>
+            <span class="tv-tag primary" style="margin:0"><span class="t">Mood</span>:<span class="v">tense</span> <i class="fa-solid fa-xmark rm"></i></span>
+            <span class="tv-tag primary" style="margin:0"><span class="t">Location</span>:<span class="v">castle</span> <i class="fa-solid fa-xmark rm"></i></span>
+            <span class="tv-tag secondary" style="margin:0"><span class="t">Weather</span>:<span class="v">storm</span> <i class="fa-solid fa-xmark rm"></i></span>
+            <span class="tv-tag chain" style="margin:0;white-space:nowrap"><span class="t">Mood</span>:<span class="v">romantic</span> <span class="sep">+</span> <span class="t">Time</span>:<span class="v">evening</span> <i class="fa-solid fa-xmark rm"></i></span>
+            <span class="tv-tag freeform" style="margin:0;white-space:nowrap"><i class="fa-solid fa-pen-fancy" style="font-size:7px"></i> <span class="v">Nostalgic about home</span> <i class="fa-solid fa-xmark rm"></i></span>
+            <button class="tv-add-inline" style="flex-shrink:0"><i class="fa-solid fa-plus" style="font-size:8px"></i></button>
+        </div>
 
-    <table style="width:100%; max-width:900px; border-collapse:collapse; font-size:12px; margin-left:50px;">
-        <thead>
-            <tr>
-                <th style="padding:8px 12px; text-align:left; border-bottom:2px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); font-weight:600;">Action</th>
-                <th style="padding:8px 12px; text-align:left; border-bottom:2px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); font-weight:600;">Where</th>
-                <th style="padding:8px 12px; text-align:left; border-bottom:2px solid var(--border); font-size:10px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); font-weight:600;">How</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Glance at tree structure</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Sidebar mini-kanban</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Read-only category rows with counts and summaries</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Navigate to any depth</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup tree sidebar</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Click tree nodes to expand/collapse, click to select</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">See node summary</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup main panel</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Shown at top when any node is selected</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Inspect entry content</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup detail panel</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Click entry row → detail slides in from right</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Move entry to different node</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Drag &#8942;&#8942; handle onto any tree node (highlights on hover)</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Rename node</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup main panel</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Click &#9998; icon next to node title, or double-click in tree sidebar</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Add/delete category</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup toolbar + main panel</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Toolbar "Add Category" for root-level; &#128465; icon in main panel header for selected node</td>
-            </tr>
-            <tr>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border); color:var(--text-bright); font-weight:600;">Search</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Popup search bar</td>
-                <td style="padding:8px 12px; border-bottom:1px solid var(--border);">Filters tree sidebar nodes + entry names in real-time</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <div class="callout" style="max-width:900px; margin-left:50px;">
-        <strong>Code impact:</strong> The popup changes from kanban column builders (~150 lines with hardcoded depth) to a recursive tree renderer (~80 lines, unlimited depth) plus a simple entry list and detail panel.
-        The sidebar mini-kanban is ~30 lines — one loop over <code>tree.root.children</code> building read-only category rows.
-        Net effect is less code handling more depth with cleaner separation.
+        <div class="settings-row">
+            <div class="setting-col"><label>Scan Depth</label><input type="number" value="2"></div>
+            <div class="setting-col"><label>Case-Sensitive</label><select><option>Use global</option></select></div>
+            <div class="setting-col"><label>Whole Words</label><select><option>Use global</option></select></div>
+            <div class="setting-col"><label>Group Scoring</label><select><option>Use global</option></select></div>
+        </div>
+        <div class="content-area">
+            <div class="content-label">Content 📝 (Tokens: 253)</div>
+            <div class="content-text">Velverra stands as a unique kingdom where medieval traditions blend...</div>
+        </div>
     </div>
 </div>
 

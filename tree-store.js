@@ -313,6 +313,8 @@ export const SETTING_DEFAULTS = {
     sidecarAutoRetrieval: false,
     sidecarContextMessages: 10,
     sidecarMaxInjectionTokens: 4000,
+    // LLM-evaluable conditional triggers (evaluated during sidecar retrieval)
+    conditionalTriggersEnabled: true,
     // Sidecar post-gen writer
     sidecarPostGenWriter: false,
     sidecarWriterContextMessages: 15,

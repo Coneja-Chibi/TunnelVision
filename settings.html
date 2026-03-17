@@ -24,6 +24,14 @@
                     <span class="tv-toggle-label">Enable TunnelVision</span>
                 </label>
                 <div class="tv-help-text">Master toggle. When enabled, registers the search tool for LLM use.</div>
+                <div id="tv_conditional_master_row" style="display:none; margin-top: 6px; margin-left: 20px;">
+                    <label class="tv-toggle">
+                        <input id="tv_conditional_triggers_master" type="checkbox" />
+                        <span class="tv-toggle-slider"></span>
+                        <span class="tv-toggle-label">Enable Narrative Conditionals</span>
+                    </label>
+                    <div class="tv-help-text">Evaluate <code>[mood:X]</code>, <code>[location:X]</code>, <code>[weather:X]</code>, etc. conditions on entries via sidecar.</div>
+                </div>
             </div>
 
             <div id="tv_main_controls" style="display:none;">
@@ -733,6 +741,16 @@
                                             <div style="flex: 1;">
                                                 <label class="tv-label" for="tv_sidecar_max_injection">Max Injection (tokens)</label>
                                                 <input type="number" id="tv_sidecar_max_injection" class="tv-number-input" min="500" max="16000" step="500" value="4000" />
+                                            </div>
+                                        </div>
+                                        <div style="margin-top: 8px;">
+                                            <label class="tv-toggle">
+                                                <input id="tv_conditional_triggers" type="checkbox" />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Narrative Conditionals</span>
+                                            </label>
+                                            <div class="tv-help-text" style="margin-top: 4px;">
+                                                Evaluate <code>[mood:X]</code>, <code>[location:X]</code>, <code>[weather:X]</code>, <code>[activity:X]</code>, <code>[relationship:X]</code>, <code>[emotion:X]</code>, and <code>[timeOfDay:X]</code> conditions on lorebook entries. Add these as keywords and the sidecar will evaluate scene state to decide if entries should activate.
                                             </div>
                                         </div>
                                     </div>

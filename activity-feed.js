@@ -66,16 +66,16 @@ let panelBody = null;
 
 // Tool display config
 const TOOL_DISPLAY = {
-    'TunnelVision_Search':     { icon: 'fa-magnifying-glass', verb: 'Searched', color: '#e84393' },
-    'TunnelVision_Remember':   { icon: 'fa-brain',           verb: 'Remembered', color: '#6c5ce7' },
-    'TunnelVision_Update':     { icon: 'fa-pen',             verb: 'Updated', color: '#f0946c' },
-    'TunnelVision_Forget':     { icon: 'fa-eraser',          verb: 'Forgot', color: '#ef4444' },
-    'TunnelVision_Reorganize': { icon: 'fa-arrows-rotate',   verb: 'Reorganized', color: '#00b894' },
-    'TunnelVision_Summarize':  { icon: 'fa-file-lines',      verb: 'Summarized', color: '#fdcb6e' },
-    'TunnelVision_MergeSplit': { icon: 'fa-code-merge',       verb: 'Merged/Split', color: '#0984e3' },
-    'TunnelVision_Notebook':   { icon: 'fa-note-sticky',     verb: 'Noted', color: '#a29bfe' },
+    'TunnelVision_Search':     { icon: 'fa-magnifying-glass', verb: 'Searched', color: '#e84393', activeVerb: 'Searching…' },
+    'TunnelVision_Remember':   { icon: 'fa-brain',           verb: 'Remembered', color: '#6c5ce7', activeVerb: 'Remembering…' },
+    'TunnelVision_Update':     { icon: 'fa-pen',             verb: 'Updated', color: '#f0946c', activeVerb: 'Updating…' },
+    'TunnelVision_Forget':     { icon: 'fa-eraser',          verb: 'Forgot', color: '#ef4444', activeVerb: 'Forgetting…' },
+    'TunnelVision_Reorganize': { icon: 'fa-arrows-rotate',   verb: 'Reorganized', color: '#00b894', activeVerb: 'Reorganizing…' },
+    'TunnelVision_Summarize':  { icon: 'fa-file-lines',      verb: 'Summarized', color: '#fdcb6e', activeVerb: 'Summarizing…' },
+    'TunnelVision_MergeSplit': { icon: 'fa-code-merge',       verb: 'Merged/Split', color: '#0984e3', activeVerb: 'Merging/Splitting…' },
+    'TunnelVision_Notebook':   { icon: 'fa-note-sticky',     verb: 'Noted', color: '#a29bfe', activeVerb: 'Writing note…' },
     // BlackBox
-    'BlackBox_Pick':           { icon: 'fa-cube',            verb: 'Picked', color: '#00cec9' },
+    'BlackBox_Pick':           { icon: 'fa-cube',            verb: 'Picked', color: '#00cec9', activeVerb: 'Picking…' },
 };
 
 /**
@@ -144,7 +144,9 @@ function saveFeed() {
         const context = getContext();
         if (!context.chatMetadata || !context.chatId) return;
         if (activeChatId && context.chatId !== activeChatId) return;
-        context.chatMetadata[METADATA_KEY] = { items: feedItems, nextId };
+        // Don't persist transient in-progress items
+        const persistable = feedItems.filter(item => !item._inProgress);
+        context.chatMetadata[METADATA_KEY] = { items: persistable, nextId };
         context.saveMetadataDebounced();
     } catch { /* no active chat */ }
 }
@@ -443,6 +445,12 @@ function onToolCallsPerformed(invocations) {
         if (activeChatId && currentChatId !== activeChatId) return;
     } catch { /* no chat context */ }
 
+    // Remove in-progress items for completed tools
+    const completedNames = invocations
+        .filter(inv => ALL_TOOL_NAMES.includes(inv?.name) || TOOL_DISPLAY[inv?.name])
+        .map(inv => inv.name);
+    if (completedNames.length > 0) removeInProgressItems(completedNames);
+
     const timestamp = Date.now();
     const items = [];
 
@@ -566,6 +574,7 @@ function renderAllItems() {
 
 function buildItemElement(item) {
     const rowClasses = ['tv-float-item'];
+    if (item._inProgress) rowClasses.push('tv-float-item-active');
     if (item.type === 'entry') {
         rowClasses.push('tv-float-item-entry');
         rowClasses.push(item.source === 'native' ? 'tv-float-item-entry-native' : 'tv-float-item-entry-tv');
@@ -842,6 +851,74 @@ export function getFeedItems() {
 }
 
 /**
+ * Log a tool call starting (in-progress) to the activity feed.
+ * Shows immediately with a pulsing "active" style. The in-progress item is
+ * automatically replaced when onToolCallsPerformed fires with the completed version.
+ * Called from tool-registry.js action wrappers.
+ * @param {string} toolName
+ * @param {object} [params]
+ */
+export function logToolCallStarted(toolName, params = {}) {
+    const display = TOOL_DISPLAY[toolName];
+    if (!display) return;
+
+    const summary = buildToolStartedSummary(toolName, params);
+    const item = {
+        id: nextId++,
+        type: 'tool',
+        icon: display.icon,
+        verb: display.activeVerb || `${display.verb}…`,
+        color: display.color,
+        summary,
+        timestamp: Date.now(),
+        _inProgress: true,
+        _toolName: toolName,
+    };
+
+    addFeedItems([item]);
+}
+
+/**
+ * Remove in-progress feed items for tools that have now completed.
+ * Called internally when TOOL_CALLS_PERFORMED fires.
+ * @param {string[]} completedToolNames
+ */
+function removeInProgressItems(completedToolNames) {
+    const nameSet = new Set(completedToolNames);
+    const before = feedItems.length;
+    feedItems = feedItems.filter(item => !(item._inProgress && nameSet.has(item._toolName)));
+    if (feedItems.length !== before) {
+        saveFeed();
+        if (panelEl?.classList.contains('open')) renderAllItems();
+    }
+}
+
+/**
+ * Build a brief summary for an in-progress tool call.
+ */
+function buildToolStartedSummary(toolName, params) {
+    switch (toolName) {
+        case 'TunnelVision_Search': {
+            const action = params.action || 'retrieve';
+            const nodeIds = Array.isArray(params.node_ids) ? params.node_ids : (params.node_id ? [params.node_id] : []);
+            if (action === 'search' && params.query) return `"${truncate(params.query, 40)}"`;
+            if (action === 'navigate' && nodeIds.length > 0) return `→ ${nodeIds[0]}`;
+            return nodeIds.length > 0 ? nodeIds.join(', ') : 'tree';
+        }
+        case 'TunnelVision_Remember':
+            return params.title ? `"${truncate(params.title, 50)}"` : 'new entry';
+        case 'TunnelVision_Update':
+            return params.uid ? `UID ${params.uid}` : 'entry';
+        case 'TunnelVision_Forget':
+            return params.uid ? `UID ${params.uid}` : 'entry';
+        case 'TunnelVision_Notebook':
+            return params.title ? `"${truncate(params.title, 40)}"` : (params.action || 'write');
+        default:
+            return '';
+    }
+}
+
+/**
  * Log a sidecar write operation to the activity feed.
  * Called by sidecar-writer.js after each successful operation.
  * @param {'remember'|'update'} opType
@@ -906,6 +983,45 @@ export function logSidecarRetrieval({ nodeIds = [], nodeLabels = [], charCount =
         sidecarModel: modelLabel,
         reasoning,
     }];
+
+    addFeedItems(items);
+}
+
+/**
+ * Log conditional evaluation results to the activity feed.
+ * @param {Array<{ uid: number, accepted: boolean, reason: string }>} evaluations
+ * @param {Array<{ uid: number, title: string, primaryConditions: Array, secondaryConditions: Array }>} conditionalEntries
+ */
+export function logConditionalEvaluations(evaluations, conditionalEntries) {
+    if (!evaluations || evaluations.length === 0) return;
+
+    const modelLabel = getSidecarModelLabel();
+    const items = [];
+
+    for (const evaluation of evaluations) {
+        const entry = conditionalEntries.find(e => e.uid === evaluation.uid);
+        const title = entry?.title || `Entry #${evaluation.uid}`;
+
+        // Build condition summary
+        const allConditions = [
+            ...(entry?.primaryConditions || []),
+            ...(entry?.secondaryConditions || []),
+        ].map(c => `[${c.type}:${c.value}]`);
+        const conditionText = allConditions.length > 0 ? allConditions.join(', ') : '';
+
+        items.push({
+            id: nextId++,
+            type: 'tool',
+            icon: evaluation.accepted ? 'fa-check-circle' : 'fa-times-circle',
+            verb: evaluation.accepted ? 'Conditional Accepted' : 'Conditional Rejected',
+            color: evaluation.accepted ? '#00cec9' : '#636e72',
+            summary: `"${title}" ${conditionText}`,
+            timestamp: Date.now(),
+            isSidecar: true,
+            sidecarModel: modelLabel,
+            reasoning: evaluation.reason,
+        });
+    }
 
     addFeedItems(items);
 }
