@@ -566,7 +566,6 @@ export async function registerTools() {
                 displayName: 'TunnelVision Guide',
                 description: guideDesc,
                 parameters: {
-                    $schema: 'http://json-schema.org/draft-04/schema#',
                     type: 'object',
                     properties: {
                         tool: {
