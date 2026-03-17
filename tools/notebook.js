@@ -28,12 +28,13 @@ const MAX_NOTES = 50;
  * (write → see result → remove → rewrite → repeat until depth limit).
  * Tracks note IDs written this generation cycle. Reset on each new generation.
  */
-let _writeGuard = { generationId: 0, writtenTitles: new Set(), writeCount: 0 };
+let _writeGuard = { generationId: 0, writtenTitles: new Set(), writeCount: 0, operationCount: 0 };
 const MAX_WRITES_PER_GENERATION = 3;
+const MAX_OPS_PER_GENERATION = 10;
 
 /** Call at the start of each generation to reset the write guard. */
 export function resetNotebookWriteGuard() {
-    _writeGuard = { generationId: Date.now(), writtenTitles: new Set(), writeCount: 0 };
+    _writeGuard = { generationId: Date.now(), writtenTitles: new Set(), writeCount: 0, operationCount: 0 };
 }
 
 /**
@@ -125,6 +126,10 @@ Actions:
                     if (!args.title || !args.content) {
                         return 'Write requires both "title" and "content".';
                     }
+                    // Total operation guard: cap all notebook mutations per generation
+                    if (_writeGuard.operationCount >= MAX_OPS_PER_GENERATION) {
+                        return `Notebook operation limit reached for this turn (${MAX_OPS_PER_GENERATION} ops). Your existing notes are preserved. Continue with your response.`;
+                    }
                     // Loop guard: cap writes per generation to prevent write→remove→rewrite loops
                     if (_writeGuard.writeCount >= MAX_WRITES_PER_GENERATION) {
                         return `Notebook write limit reached for this turn (${MAX_WRITES_PER_GENERATION} writes). Your existing notes are preserved. Continue with your response.`;
@@ -141,6 +146,7 @@ Actions:
                         created: Date.now(),
                     });
                     _writeGuard.writeCount++;
+                    _writeGuard.operationCount++;
                     _writeGuard.writtenTitles.add(args.title.trim().toLowerCase());
                     saveNotebook();
                     return `Note saved: "${args.title}" (ID: ${id}). You'll see it in your context every turn.`;
@@ -161,20 +167,29 @@ Actions:
                     if (!args.note_id) {
                         return 'Remove requires a "note_id".';
                     }
+                    // Loop guard: cap total operations to prevent write→remove→rewrite loops
+                    if (_writeGuard.operationCount >= MAX_OPS_PER_GENERATION) {
+                        return `Notebook operation limit reached for this turn (${MAX_OPS_PER_GENERATION} ops). Continue with your response.`;
+                    }
                     const notebook = getNotebook();
                     const idx = notebook.findIndex(n => n.id === args.note_id);
                     if (idx === -1) {
                         return `Note "${args.note_id}" not found. Use "read" to see current notes.`;
                     }
                     const removed = notebook.splice(idx, 1)[0];
+                    _writeGuard.operationCount++;
                     saveNotebook();
                     return `Removed note: "${removed.title}" (${removed.id}).`;
                 }
 
                 case 'clear': {
+                    if (_writeGuard.operationCount >= MAX_OPS_PER_GENERATION) {
+                        return `Notebook operation limit reached for this turn (${MAX_OPS_PER_GENERATION} ops). Continue with your response.`;
+                    }
                     const notebook = getNotebook();
                     const count = notebook.length;
                     notebook.length = 0;
+                    _writeGuard.operationCount++;
                     saveNotebook();
                     return `Cleared ${count} note(s) from notebook.`;
                 }

@@ -41,6 +41,11 @@ const EXTENSION_FOLDER = `third-party/TunnelVision`;
 // (lorebook saves from tool actions trigger this event mid-generation).
 let _generationInProgress = false;
 
+// Tracks recursion depth for tool-call passes within a single generation turn.
+// ST's Generate() increments depth internally but doesn't expose it to extensions,
+// so we mirror it here to know when we're on the final pass.
+let _toolRecursionDepth = 0;
+
 async function init() {
     // Ensure settings exist
     getSettings();
@@ -101,12 +106,19 @@ async function init() {
         eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
     }
 
+    // Strip tool definitions on the final recursion pass so the model writes narrative
+    // instead of making tool calls that ST will ignore (depth >= RECURSE_LIMIT).
+    if (event_types.CHAT_COMPLETION_SETTINGS_READY) {
+        eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, onChatCompletionSettingsReady);
+    }
+
     // Clear generation guard when generation ends (covers abort/stop paths).
     // MESSAGE_RECEIVED already clears it for the normal completion path.
     if (event_types.GENERATION_ENDED) {
         eventSource.on(event_types.GENERATION_ENDED, () => {
             console.debug('[TunnelVision] GENERATION_ENDED — clearing generation guards');
             _generationInProgress = false;
+            _toolRecursionDepth = 0;
             window.TunnelVision_isRecursiveToolPass = false;
         });
     } else {
@@ -114,6 +126,7 @@ async function init() {
             eventSource.on(event_types.GENERATION_STOPPED, () => {
                 console.debug('[TunnelVision] GENERATION_STOPPED — clearing generation guards');
                 _generationInProgress = false;
+                _toolRecursionDepth = 0;
                 window.TunnelVision_isRecursiveToolPass = false;
             });
         }
@@ -623,6 +636,29 @@ function cleanOrphanedToolInvocations() {
 }
 
 /**
+ * Strip tool definitions from the API request on the final recursion pass.
+ * ST's Generate() stops processing tool calls at depth >= RECURSE_LIMIT, but
+ * registerFunctionToolsOpenAI() still sends tool definitions unconditionally.
+ * Claude sees tools, makes tool calls + "..." text, the calls get ignored,
+ * and "..." becomes the visible output. By setting tool_choice to "none" on
+ * the final pass, we force the model to write narrative instead.
+ */
+function onChatCompletionSettingsReady(data) {
+    if (!_generationInProgress) return;
+
+    const recurseLimit = ToolManager.RECURSE_LIMIT ?? 5;
+    if (_toolRecursionDepth >= recurseLimit - 1) {
+        if (data.tools) {
+            delete data.tools;
+        }
+        if (data.tool_choice) {
+            data.tool_choice = 'none';
+        }
+        console.log(`[TunnelVision] Final recursion pass (depth=${_toolRecursionDepth}, limit=${recurseLimit}) — stripped tools to force narrative output`);
+    }
+}
+
+/**
  * Inject or clear the mandatory tool call system prompt before each generation.
  * Runs before ST assembles the next request, so it can validate TV tool state first.
  */
@@ -643,9 +679,17 @@ async function onGenerationStarted(type, opts, dryRun) {
     const isRecursiveToolPass = lastMsg?.extra?.tool_invocations != null;
     console.debug(`[TunnelVision] GENERATION_STARTED: isRecursiveToolPass=${isRecursiveToolPass} chatLength=${context.chat?.length} lastMsgType=${lastMsg?.is_system ? 'system' : lastMsg?.is_user ? 'user' : 'assistant'} hasToolInvocations=${!!lastMsg?.extra?.tool_invocations}`);
 
+    // Track recursion depth so we can strip tools on the final pass
+    if (isRecursiveToolPass) {
+        _toolRecursionDepth++;
+    } else {
+        _toolRecursionDepth = 0;
+    }
+
     // Expose recursive state globally so presets, macros, and other extensions can
     // skip work during recursive tool passes.
     window.TunnelVision_isRecursiveToolPass = isRecursiveToolPass;
+    window.TunnelVision_toolRecursionDepth = _toolRecursionDepth;
 
     // On recursive passes, clear the mandatory tool prompt so the model isn't
     // told "you MUST call a tool" when it already has tool results and should

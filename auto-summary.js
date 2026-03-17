@@ -78,6 +78,14 @@ function onGenerationForAutoSummary() {
     }
 
     if (count >= interval) {
+        // Don't inject if the Summarize tool is disabled — the model can't obey the instruction
+        const disabled = settings.disabledTools || {};
+        if (disabled['TunnelVision_Summarize']) {
+            console.warn('[TunnelVision] Auto-summary threshold reached but TunnelVision_Summarize is disabled. Skipping injection.');
+            clearPrompt();
+            return;
+        }
+
         if (!pendingSummaries.has(chatId)) {
             pendingSummaries.set(chatId, { triggeredAt: count });
             console.log(`[TunnelVision] Auto-summary pending after ${count} messages`);
