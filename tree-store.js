@@ -301,8 +301,8 @@ export const SETTING_DEFAULTS = {
     notebookPromptPosition: 'in_chat',
     notebookPromptDepth: 1,
     notebookPromptRole: 'system',
-    selectiveRetrieval: false,
-    ephemeralResults: false,
+    selectiveRetrieval: true,
+    ephemeralResults: true,
     ephemeralToolFilter: ['TunnelVision_Search', 'TunnelVision_Summarize', 'TunnelVision_MergeSplit'],
     stealthMode: false,
     autoHideSummarized: true,
@@ -322,7 +322,7 @@ export const SETTING_DEFAULTS = {
     // Per-lorebook permissions: { bookName: 'read_write' | 'read_only' | 'write_only' }
     bookPermissions: {},
     // Compact tool prompts: register one guide tool + one-liner descriptions to save tokens
-    compactToolPrompts: false,
+    compactToolPrompts: true,
 };
 
 function ensureSettings() {
