@@ -603,26 +603,17 @@
 
                         <hr class="tv-adv-divider" />
 
-                        <!-- ═══ !Commands ═══ -->
+                        <!-- ═══ Slash Commands ═══ -->
                         <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">User Commands</div>
+                            <div class="tv-adv-section-title">Slash Commands</div>
                             <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Type commands in the chat box to force tool calls. Example: <code>!summarize "The Battle"</code> forces a summary with that title.
+                                Use <code>/tv-search</code>, <code>/tv-remember</code>, <code>/tv-summarize</code>,
+                                <code>/tv-forget</code>, <code>/tv-merge</code>, <code>/tv-split</code>, <code>/tv-ingest</code>
+                                in the chat box to force tool actions.
                             </div>
-                            <label class="tv-checkbox-row">
-                                <input id="tv_commands_enabled" type="checkbox" checked />
-                                <span>Enable !commands</span>
-                            </label>
-                            <div class="tv-number-row" style="margin-top: 8px;">
-                                <label class="tv-number-label" for="tv_command_prefix">Prefix:</label>
-                                <input id="tv_command_prefix" type="text" class="tv-text-input" style="width: 40px;" value="!" maxlength="3" />
-                            </div>
-                            <div class="tv-number-row" style="margin-top: 6px;">
+                            <div class="tv-number-row">
                                 <label class="tv-number-label" for="tv_command_context">Context messages:</label>
                                 <input id="tv_command_context" type="number" class="tv-number-input" min="5" max="500" step="5" value="50" />
-                            </div>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                Available: <code>!summarize</code>, <code>!remember</code>, <code>!search</code>, <code>!forget</code>, <code>!ingest</code>
                             </div>
                         </div>
 
@@ -783,6 +774,28 @@
                     </div>
                 </div>
 
+                <!-- Backup & Restore -->
+                <div class="tv-card">
+                    <div class="tv-card-header tv-card-header-collapsible" id="tv_backup_header">
+                        <i class="fa-solid fa-box-archive"></i>
+                        <span>Backup &amp; Restore</span>
+                        <i class="fa-solid fa-chevron-down tv-collapse-icon"></i>
+                    </div>
+                    <div class="tv-card-body" style="display:none;">
+                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                            Export or import all trees, enabled states, descriptions, and permissions as a single file.
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="tv_bulk_export" class="tv-btn tv-btn-secondary" style="flex:1;">
+                                <i class="fa-solid fa-file-export"></i> Export All
+                            </button>
+                            <button id="tv_bulk_import" class="tv-btn tv-btn-secondary" style="flex:1;">
+                                <i class="fa-solid fa-file-import"></i> Import All
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Diagnostics Section -->
                 <div class="tv-card tv-card-diagnostics">
                     <div class="tv-card-header tv-card-header-collapsible" id="tv_diagnostics_header">
@@ -805,4 +818,5 @@
     </div>
     <!-- Hidden file input for import -->
     <input type="file" id="tv_import_file" accept=".json" style="display:none;" />
+    <input type="file" id="tv_bulk_import_file" accept=".json" style="display:none;" />
 </div>

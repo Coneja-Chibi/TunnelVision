@@ -1094,45 +1094,18 @@ function checkPromptInjectionSettings() {
     return pass('Prompt injection settings valid');
 }
 
-/** Check !commands configuration: prerequisites, settings validation, and auto-fix. */
+/** Check slash commands configuration: context messages validation and auto-fix. */
 function checkCommandsConfig() {
     const settings = getSettings();
-
-    // Feature disabled — just report it
-    if (!settings.commandsEnabled) {
-        return pass('User commands: disabled');
-    }
-
-    // Check prerequisite event
-    if (!event_types || !event_types.GENERATION_STARTED) {
-        return warn(
-            'event_types.GENERATION_STARTED not available. ' +
-            '!commands will not intercept generations. Requires a newer ST version.',
-        );
-    }
-
-    // Validate and auto-fix commandPrefix
-    let prefix = settings.commandPrefix;
-    if (!prefix || typeof prefix !== 'string' || prefix.length === 0) {
-        settings.commandPrefix = '!';
-        prefix = '!';
-        return warn('Command prefix was empty. Auto-reset to "!".');
-    }
-    if (prefix.length > 3) {
-        const oldLen = prefix.length;
-        settings.commandPrefix = prefix.slice(0, 3);
-        prefix = settings.commandPrefix;
-        return warn(`Command prefix was ${oldLen} chars (max 3). Truncated to "${prefix}".`);
-    }
 
     // Validate and auto-fix commandContextMessages
     const ctx = Number(settings.commandContextMessages);
     if (!isFinite(ctx) || ctx < 1) {
         settings.commandContextMessages = 50;
-        return warn('Command context messages was invalid. Auto-reset to 50.');
+        return warn('Slash command context messages was invalid. Auto-reset to 50.');
     }
 
-    return pass(`User commands: enabled (prefix "${prefix}", context ${ctx} msgs)`);
+    return pass(`Slash commands: registered (context ${ctx} msgs)`);
 }
 
 /** Check auto-summary configuration. */

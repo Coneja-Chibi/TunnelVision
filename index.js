@@ -14,7 +14,7 @@
  *   entry-manager.js— Lorebook CRUD operations shared by memory tools.
  *   ui-controller.js— Settings panel rendering, tree editor, drag-and-drop.
  *   diagnostics.js  — Failure point checks and auto-fixes.
- *   commands.js     — !command syntax interceptor (summarize, remember, search, forget, ingest).
+ *   commands.js     — /tv-* slash commands (search, remember, summarize, forget, merge, split, ingest).
  *   auto-summary.js — Automatic summary injection every N messages.
  */
 
@@ -66,7 +66,7 @@ async function init() {
     // Initialize activity feed (listens for tool call events)
     initActivityFeed();
 
-    // Wire up !command interception
+    // Register /tv-* slash commands
     initCommands();
 
     // Wire up auto-summary interval tracking

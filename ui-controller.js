@@ -88,6 +88,9 @@ export function bindUIEvents() {
     $('#tv_build_llm').on('click', onBuildWithLLM);
     $('#tv_open_tree_editor').on('click', onOpenTreeEditor);
     $('#tv_import_file').on('change', onImportTree);
+    $('#tv_bulk_export').on('click', onBulkExport);
+    $('#tv_bulk_import_file').on('change', onBulkImport);
+    $('#tv_bulk_import').on('click', () => $('#tv_bulk_import_file').trigger('click'));
 
     $('#tv_run_diagnostics').on('click', onRunDiagnostics);
 
@@ -152,9 +155,7 @@ export function bindUIEvents() {
     $('#tv_ephemeral_results').on('change', onEphemeralResultsToggle);
     $('.tv_ephemeral_tool').on('change', onEphemeralToolFilterChange);
 
-    // !commands settings
-    $('#tv_commands_enabled').on('change', onCommandsEnabledToggle);
-    $('#tv_command_prefix').on('change', onCommandPrefixChange);
+    // Slash commands context setting
     $('#tv_command_context').on('change', onCommandContextChange);
 
     // Auto-summary settings
@@ -192,6 +193,12 @@ export function bindUIEvents() {
 
     // Per-lorebook permissions
     $('#tv_book_permission').on('change', onBookPermissionChange);
+
+    // Backup & Restore collapsible header
+    $('#tv_backup_header').on('click', function () {
+        $(this).toggleClass('expanded');
+        $(this).next('.tv-card-body').slideToggle(200);
+    });
 
     // Diagnostics collapsible header
     $('#tv_diagnostics_header').on('click', function () {
@@ -284,9 +291,7 @@ export function refreshUI() {
         $(this).prop('checked', filterList.includes($(this).val()));
     });
 
-    // Sync !commands settings
-    $('#tv_commands_enabled').prop('checked', settings.commandsEnabled !== false);
-    $('#tv_command_prefix').val(settings.commandPrefix || '!');
+    // Sync slash command context setting
     $('#tv_command_context').val(settings.commandContextMessages ?? 50);
 
     // Sync auto-summary settings
@@ -840,21 +845,7 @@ function onEphemeralToolFilterChange() {
     saveSettingsDebounced();
 }
 
-// ─── Commands Settings ───────────────────────────────────────────
-
-function onCommandsEnabledToggle() {
-    const settings = getSettings();
-    settings.commandsEnabled = $(this).prop('checked');
-    saveSettingsDebounced();
-}
-
-function onCommandPrefixChange() {
-    const val = $(this).val()?.trim() || '!';
-    $(this).val(val);
-    const settings = getSettings();
-    settings.commandPrefix = val;
-    saveSettingsDebounced();
-}
+// ─── Slash Commands Settings ─────────────────────────────────────
 
 function onCommandContextChange() {
     const raw = Number($('#tv_command_context').val());
@@ -1832,6 +1823,104 @@ function onImportTree(e) {
     };
     reader.readAsText(file);
     // Reset file input so same file can be re-imported
+    $(e.target).val('');
+}
+
+function onBulkExport() {
+    const settings = getSettings();
+    const trees = settings.trees || {};
+    const enabledLorebooks = settings.enabledLorebooks || {};
+    const bookDescriptions = settings.bookDescriptions || {};
+    const bookPermissions = settings.bookPermissions || {};
+
+    // Build a snapshot of all trees + per-book settings
+    const backup = {
+        _tunnelvision_backup: true,
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        trees: JSON.parse(JSON.stringify(trees)),
+        enabledLorebooks: JSON.parse(JSON.stringify(enabledLorebooks)),
+        bookDescriptions: JSON.parse(JSON.stringify(bookDescriptions)),
+        bookPermissions: JSON.parse(JSON.stringify(bookPermissions)),
+    };
+
+    const treeCount = Object.keys(trees).length;
+    if (treeCount === 0) {
+        toastr.warning('No trees to export.', 'TunnelVision');
+        return;
+    }
+
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tunnelvision_backup_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toastr.success(`Exported ${treeCount} tree(s) + settings.`, 'TunnelVision');
+}
+
+function onBulkImport(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        try {
+            const backup = JSON.parse(ev.target.result);
+            if (!backup._tunnelvision_backup || !backup.trees) {
+                throw new Error('Not a valid TunnelVision backup file.');
+            }
+
+            const settings = getSettings();
+            const treeCount = Object.keys(backup.trees).length;
+
+            // Confirm overwrite
+            if (!confirm(`This will import ${treeCount} tree(s) and their settings. Existing trees with the same names will be overwritten. Continue?`)) {
+                return;
+            }
+
+            // Import trees
+            for (const [bookName, tree] of Object.entries(backup.trees)) {
+                if (!tree?.root || !Array.isArray(tree.root.children)) {
+                    console.warn(`[TunnelVision] Skipping invalid tree: ${bookName}`);
+                    continue;
+                }
+                sanitizeImportedNode(tree.root);
+                tree.lorebookName = bookName;
+                saveTree(bookName, {
+                    lorebookName: tree.lorebookName,
+                    root: tree.root,
+                    version: Number(tree.version) || 1,
+                    lastBuilt: tree.lastBuilt || Date.now(),
+                });
+            }
+
+            // Import per-book settings
+            if (backup.enabledLorebooks) {
+                for (const [bookName, enabled] of Object.entries(backup.enabledLorebooks)) {
+                    setLorebookEnabled(bookName, enabled);
+                }
+            }
+            if (backup.bookDescriptions) {
+                for (const [bookName, desc] of Object.entries(backup.bookDescriptions)) {
+                    setBookDescription(bookName, desc);
+                }
+            }
+            if (backup.bookPermissions) {
+                for (const [bookName, perm] of Object.entries(backup.bookPermissions)) {
+                    setBookPermission(bookName, perm);
+                }
+            }
+
+            toastr.success(`Imported ${treeCount} tree(s) + settings.`, 'TunnelVision');
+            populateLorebookDropdown();
+            registerTools();
+        } catch (err) {
+            toastr.error(`Bulk import failed: ${err.message}`, 'TunnelVision');
+        }
+    };
+    reader.readAsText(file);
     $(e.target).val('');
 }
 

@@ -1,207 +1,259 @@
 /**
- * TunnelVision Commands
- * Intercepts !command syntax typed in the chat textarea before generation.
- * Commands are parsed on GENERATION_STARTED, stripped from the textarea,
- * and replaced with a forced tool-call instruction via setExtensionPrompt.
+ * TunnelVision Slash Commands
+ * Registers /tv-* slash commands for forcing tool actions.
+ * Uses generateQuietPrompt for silent tool execution — no visible messages, no narrative output.
  *
- * Supported commands (prefix configurable, default "!"):
- *   !summarize [title]  — Force TunnelVision_Summarize with the given title
- *   !remember [content] — Force TunnelVision_Remember with the given content
- *   !search [query]     — Force TunnelVision_Search for the given query
- *   !forget [name]      — Force TunnelVision_Forget for the named entry
- *   !merge [entries]    — Force TunnelVision_MergeSplit merge for the named entries
- *   !split [entry]      — Force TunnelVision_MergeSplit split for the named entry
- *   !ingest             — Ingest recent chat messages into the active lorebook (no generation)
+ * Commands:
+ *   /tv-search [query]     — Force a lorebook search
+ *   /tv-remember [content] — Force saving to memory (detects schema design requests)
+ *   /tv-summarize [title]  — Force a scene summary
+ *   /tv-forget [name]      — Force forgetting an entry
+ *   /tv-merge [entries]    — Force merging entries
+ *   /tv-split [entry]      — Force splitting an entry
+ *   /tv-ingest [lorebook]  — Ingest recent chat messages (no generation)
  *
  * Settings consumed (from tree-store.js getSettings()):
- *   commandsEnabled        boolean  default true
- *   commandPrefix          string   default '!'
  *   commandContextMessages number   default 50
  */
 
-import { eventSource, event_types, setExtensionPrompt, extension_prompt_types } from '../../../../script.js';
+import { generateQuietPrompt } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
+import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
+import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 import { getSettings, getSelectedLorebook } from './tree-store.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
 import { ingestChatMessages } from './tree-builder.js';
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Extension prompt key — must be unique across all TV prompts. */
-const TV_CMD_PROMPT_KEY = 'tunnelvision_command';
-
-/** Canonical command names, lowercase. */
-const KNOWN_COMMANDS = ['summarize', 'remember', 'search', 'forget', 'merge', 'split', 'ingest'];
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-let _commandsInitialized = false;
+let _initialized = false;
 
 /**
- * Wire up the GENERATION_STARTED listener.
- * Safe to call multiple times — idempotency guard prevents duplicate listeners.
+ * Register all /tv-* slash commands.
+ * Safe to call multiple times — idempotency guard prevents duplicate registration.
  */
 export function initCommands() {
-    if (_commandsInitialized) return;
-    _commandsInitialized = true;
+    if (_initialized) return;
+    _initialized = true;
 
-    if (!event_types.GENERATION_STARTED) {
-        console.warn('[TunnelVision] GENERATION_STARTED event not available — commands disabled.');
-        return;
-    }
-
-    eventSource.on(event_types.GENERATION_STARTED, onGenerationStartedCommand);
-    document.querySelector('#send_textarea')?.addEventListener('keydown', onTextareaKeydownCapture, true);
-    document.querySelector('#send_but')?.addEventListener('click', onSendButtonCapture, true);
+    registerSlashCommands();
 }
 
 // ---------------------------------------------------------------------------
-// Capture handlers — intercept !ingest before ST fires generation
+// Slash command registration
 // ---------------------------------------------------------------------------
 
-function onTextareaKeydownCapture(event) {
-    if (event.defaultPrevented) return;
-    if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) {
-        return;
-    }
+function registerSlashCommands() {
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-search',
+        callback: wrapCallback(handleSearch),
+        helpString: 'Force a TunnelVision lorebook search.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Search query',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 
-    tryHandleImmediateIngestCommand(event).catch(error => {
-        console.error('[TunnelVision] Immediate !ingest handling failed:', error);
-    });
-}
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-remember',
+        callback: wrapCallback(handleRemember),
+        helpString: 'Force saving content to TunnelVision memory. Detects schema/tracker design requests.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Content to remember',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 
-function onSendButtonCapture(event) {
-    if (event.defaultPrevented) return;
-    tryHandleImmediateIngestCommand(event).catch(error => {
-        console.error('[TunnelVision] Immediate !ingest handling failed:', error);
-    });
-}
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-summarize',
+        callback: wrapCallback(handleSummarize),
+        helpString: 'Force a TunnelVision scene summary.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Summary title',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 
-async function tryHandleImmediateIngestCommand(event) {
-    const settings = getSettings();
-    if (!settings.commandsEnabled) return false;
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-forget',
+        callback: wrapCallback(handleForget),
+        helpString: 'Force forgetting a TunnelVision lorebook entry.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Entry name to forget',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 
-    const prefix = settings.commandPrefix || '!';
-    const $textarea = $('#send_textarea');
-    const text = $textarea.val()?.trim() ?? '';
-    if (!text.startsWith(prefix)) return false;
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-merge',
+        callback: wrapCallback(handleMerge),
+        helpString: 'Force merging TunnelVision lorebook entries.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Entries to merge',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 
-    const parsed = parseCommand(text.slice(prefix.length).trim());
-    if (!parsed || parsed.command !== 'ingest') return false;
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-split',
+        callback: wrapCallback(handleSplit),
+        helpString: 'Force splitting a TunnelVision lorebook entry.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Entry to split',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
-
-    const activeBooks = getActiveTunnelVisionBooks();
-    if (activeBooks.length === 0) {
-        toastr.warning('No active TunnelVision lorebooks.', 'TunnelVision');
-        return true;
-    }
-
-    const targetLorebook = resolveIngestLorebook(activeBooks, parsed.arg);
-    if (!targetLorebook) {
-        toastr.warning(
-            `Multiple TunnelVision lorebooks are active. Use "${prefix}ingest <lorebook name>" or select the lorebook in TunnelVision first.`,
-            'TunnelVision',
-        );
-        return true;
-    }
-
-    const contextMessages = Number(settings.commandContextMessages) || 50;
-    $textarea.val('').trigger('input');
-    clearCommandPrompt();
-    await handleIngest(targetLorebook, contextMessages);
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Event handler
-// ---------------------------------------------------------------------------
-
-function onGenerationStartedCommand() {
-    const settings = getSettings();
-
-    if (!settings.commandsEnabled) {
-        clearCommandPrompt();
-        return;
-    }
-
-    const prefix = settings.commandPrefix || '!';
-    const $textarea = $('#send_textarea');
-    const text = $textarea.val()?.trim() ?? '';
-
-    if (!text.startsWith(prefix)) {
-        clearCommandPrompt();
-        return;
-    }
-
-    const parsed = parseCommand(text.slice(prefix.length).trim());
-    if (!parsed) {
-        clearCommandPrompt();
-        return;
-    }
-
-    // !ingest is handled by capture handlers — skip here
-    if (parsed.command === 'ingest') {
-        clearCommandPrompt();
-        return;
-    }
-
-    const activeBooks = getActiveTunnelVisionBooks();
-    if (activeBooks.length === 0) {
-        toastr.warning('No active TunnelVision lorebooks.', 'TunnelVision');
-        clearCommandPrompt();
-        return;
-    }
-
-    const contextMessages = Number(settings.commandContextMessages) || 50;
-    const targetLorebook = resolveCurrentLorebook(activeBooks);
-    const prompt = buildCommandPrompt(parsed, contextMessages, activeBooks, targetLorebook);
-
-    // Replace the !command text with a neutral user message so ST still calls
-    // sendMessageAsUser(). Clearing the textarea entirely causes Claude to error
-    // with "conversation must end with a user message" since no user turn is added.
-    const userFacingText = `[${prefix}${parsed.command}${parsed.arg ? ` ${parsed.arg}` : ''}]`;
-    $textarea.val(userFacingText).trigger('input');
-    setExtensionPrompt(TV_CMD_PROMPT_KEY, prompt, extension_prompt_types.IN_PROMPT, 0);
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-ingest',
+        callback: wrapCallback(handleIngestCommand),
+        helpString: 'Ingest recent chat messages into a TunnelVision lorebook (no generation).',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Target lorebook name (optional if only one active)',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
 }
 
 // ---------------------------------------------------------------------------
-// Command parsing
+// Callback wrapper — shared precondition checks + error handling
 // ---------------------------------------------------------------------------
 
 /**
- * Parse raw text (after the prefix has been removed) into a command + arg.
- *
- * Handles:
- *   summarize "The Battle at Dawn"  → { command: 'summarize', arg: 'The Battle at Dawn' }
- *   summarize The Battle at Dawn    → { command: 'summarize', arg: 'The Battle at Dawn' }
- *   ingest                          → { command: 'ingest',    arg: '' }
- *
- * @param {string} text - Raw text with prefix already stripped.
- * @returns {{ command: string, arg: string }|null}
+ * Wrap a command handler with standard precondition checks and error handling.
+ * @param {function} handler - The actual command handler (receives namedArgs, unnamedArg).
+ * @returns {function} Wrapped callback compatible with SlashCommand.
  */
-function parseCommand(text) {
-    if (!text) return null;
+function wrapCallback(handler) {
+    return async function (namedArgs, unnamedArg) {
+        try {
+            const settings = getSettings();
+            if (settings.globalEnabled === false) {
+                toastr.warning('TunnelVision is disabled.', 'TunnelVision');
+                return '';
+            }
 
-    // Split on first whitespace to isolate the command word.
-    const spaceIdx = text.search(/\s/);
-    const commandWord = (spaceIdx === -1 ? text : text.slice(0, spaceIdx)).toLowerCase();
+            const activeBooks = getActiveTunnelVisionBooks();
+            if (activeBooks.length === 0) {
+                toastr.warning('No active TunnelVision lorebooks.', 'TunnelVision');
+                return '';
+            }
 
-    if (!KNOWN_COMMANDS.includes(commandWord)) return null;
+            await handler(namedArgs, unnamedArg, { settings, activeBooks });
+        } catch (err) {
+            console.error('[TunnelVision] Slash command failed:', err);
+            toastr.error(`Command failed: ${err.message}`, 'TunnelVision');
+        }
+        return '';
+    };
+}
 
-    // Everything after the command word is the raw argument string.
-    const rawArg = spaceIdx === -1 ? '' : text.slice(spaceIdx + 1).trim();
+// ---------------------------------------------------------------------------
+// Command handlers
+// ---------------------------------------------------------------------------
 
-    // Strip surrounding matching quotes if present (require open/close to match).
-    const arg = rawArg.replace(/^(["'])(.*)\1$/, '$2').trim();
+async function handleSearch(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveCurrentLorebook(activeBooks);
+    const query = String(unnamedArg || '').trim() || 'recent relevant information';
+    const prompt = buildCommandPrompt({ command: 'search', arg: query }, getContextMessages(), activeBooks, targetLorebook);
 
-    return { command: commandWord, arg };
+    toastr.info('Searching lorebook...', 'TunnelVision');
+    await generateQuietPrompt(prompt);
+    toastr.success('Search complete.', 'TunnelVision');
+}
+
+async function handleRemember(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveCurrentLorebook(activeBooks);
+    const content = String(unnamedArg || '').trim() || 'Remember important details from the recent conversation';
+    const prompt = buildCommandPrompt({ command: 'remember', arg: content }, getContextMessages(), activeBooks, targetLorebook);
+
+    toastr.info('Saving to memory...', 'TunnelVision');
+    await generateQuietPrompt(prompt);
+    toastr.success('Memory saved.', 'TunnelVision');
+}
+
+async function handleSummarize(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveCurrentLorebook(activeBooks);
+    const title = String(unnamedArg || '').trim() || 'Summarize recent events';
+    const prompt = buildCommandPrompt({ command: 'summarize', arg: title }, getContextMessages(), activeBooks, targetLorebook);
+
+    toastr.info('Creating summary...', 'TunnelVision');
+    await generateQuietPrompt(prompt);
+    toastr.success('Summary created.', 'TunnelVision');
+}
+
+async function handleForget(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveCurrentLorebook(activeBooks);
+    const name = String(unnamedArg || '').trim() || 'the specified entry';
+    const prompt = buildCommandPrompt({ command: 'forget', arg: name }, getContextMessages(), activeBooks, targetLorebook);
+
+    toastr.info('Forgetting entry...', 'TunnelVision');
+    await generateQuietPrompt(prompt);
+    toastr.success('Entry forgotten.', 'TunnelVision');
+}
+
+async function handleMerge(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveCurrentLorebook(activeBooks);
+    const target = String(unnamedArg || '').trim() || 'the two most related or overlapping entries';
+    const prompt = buildCommandPrompt({ command: 'merge', arg: target }, getContextMessages(), activeBooks, targetLorebook);
+
+    toastr.info('Merging entries...', 'TunnelVision');
+    await generateQuietPrompt(prompt);
+    toastr.success('Entries merged.', 'TunnelVision');
+}
+
+async function handleSplit(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveCurrentLorebook(activeBooks);
+    const target = String(unnamedArg || '').trim() || 'the entry that covers too many topics';
+    const prompt = buildCommandPrompt({ command: 'split', arg: target }, getContextMessages(), activeBooks, targetLorebook);
+
+    toastr.info('Splitting entry...', 'TunnelVision');
+    await generateQuietPrompt(prompt);
+    toastr.success('Entry split.', 'TunnelVision');
+}
+
+async function handleIngestCommand(_namedArgs, unnamedArg, { activeBooks }) {
+    const targetLorebook = resolveIngestLorebook(activeBooks, String(unnamedArg || '').trim());
+    if (!targetLorebook) {
+        toastr.warning(
+            'Multiple TunnelVision lorebooks are active. Use "/tv-ingest <lorebook name>" or select the lorebook in TunnelVision first.',
+            'TunnelVision',
+        );
+        return;
+    }
+
+    await handleIngest(targetLorebook, getContextMessages());
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +292,19 @@ function buildLorebookInstruction(activeBooks, targetLorebook) {
     }
 
     return '';
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the configured context message count from settings.
+ * @returns {number}
+ */
+function getContextMessages() {
+    const settings = getSettings();
+    return Number(settings.commandContextMessages) || 50;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +410,7 @@ async function handleIngest(bookName, contextMessages) {
         const from = Math.max(0, chat.length - contextMessages);
         const to = chat.length - 1;
 
-        toastr.info(`Ingesting messages ${from}–${to} into "${bookName}"…`, 'TunnelVision');
+        toastr.info(`Ingesting messages ${from}\u2013${to} into "${bookName}"\u2026`, 'TunnelVision');
 
         const result = await ingestChatMessages(bookName, {
             from,
@@ -360,16 +425,7 @@ async function handleIngest(bookName, contextMessages) {
             'TunnelVision',
         );
     } catch (err) {
-        console.error('[TunnelVision] !ingest failed:', err);
+        console.error('[TunnelVision] /tv-ingest failed:', err);
         toastr.error(`Ingest failed: ${err.message}`, 'TunnelVision');
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Remove any previously injected command prompt so it doesn't bleed across turns. */
-function clearCommandPrompt() {
-    setExtensionPrompt(TV_CMD_PROMPT_KEY, '', extension_prompt_types.IN_PROMPT, 0);
 }
