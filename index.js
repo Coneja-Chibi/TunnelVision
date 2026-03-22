@@ -18,7 +18,7 @@
  *   auto-summary.js — Automatic summary injection every N messages.
  */
 
-import { eventSource, event_types, extension_prompt_types, extension_prompt_roles, setExtensionPrompt, saveSettingsDebounced } from '../../../../script.js';
+import { eventSource, event_types, extension_prompt_types, extension_prompt_roles, setExtensionPrompt, saveSettingsDebounced, main_api } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
@@ -701,6 +701,76 @@ function cleanOrphanedToolInvocations() {
 }
 
 /**
+ * Detect whether the current API request targets an Anthropic-format endpoint.
+ * Checks the model name in the request data and ST's chat completion source.
+ * @param {object} data - The chat completion settings/request object.
+ * @returns {boolean}
+ */
+function isAnthropicApi(data) {
+    // Primary signal: model name starts with "claude"
+    if (typeof data.model === 'string' && data.model.startsWith('claude')) {
+        return true;
+    }
+    // Secondary signal: ST exposes chat_completion_source on the context
+    try {
+        const context = getContext();
+        if (context?.chatCompletionSettings?.chat_completion_source === 'claude') {
+            return true;
+        }
+    } catch { /* ignore */ }
+    return false;
+}
+
+/**
+ * Convert a single tool definition from OpenAI function-calling format to
+ * the Anthropic tool format expected by the Messages API.
+ *
+ * OpenAI:    { type: "function", function: { name, description, parameters } }
+ * Anthropic: { name, description, input_schema }
+ *
+ * @param {object} tool - Tool object in OpenAI format.
+ * @returns {object} Tool object in Anthropic format, or the original if not OpenAI-wrapped.
+ */
+function convertToolToAnthropicFormat(tool) {
+    if (tool?.type === 'function' && tool.function) {
+        return {
+            name: tool.function.name,
+            description: tool.function.description || '',
+            input_schema: tool.function.parameters || { type: 'object', properties: {} },
+        };
+    }
+    return tool;
+}
+
+/**
+ * Convert the tool_choice value from OpenAI format to Anthropic format.
+ *
+ * OpenAI "auto"                  → Anthropic { type: "auto" }
+ * OpenAI "none"                  → Anthropic { type: "any" } is closest, but we just delete it
+ * OpenAI "required"              → Anthropic { type: "any" }
+ * OpenAI { type:"function", function:{ name } } → Anthropic { type:"tool", name }
+ *
+ * @param {*} toolChoice - OpenAI-format tool_choice value.
+ * @returns {*} Anthropic-format tool_choice, or undefined to omit.
+ */
+function convertToolChoiceToAnthropicFormat(toolChoice) {
+    if (toolChoice === 'none') {
+        return undefined; // Anthropic: just omit tools/tool_choice entirely
+    }
+    if (toolChoice === 'auto' || toolChoice == null) {
+        return { type: 'auto' };
+    }
+    if (toolChoice === 'required') {
+        return { type: 'any' };
+    }
+    // Object form: { type: "function", function: { name: "..." } }
+    if (toolChoice?.type === 'function' && toolChoice.function?.name) {
+        return { type: 'tool', name: toolChoice.function.name };
+    }
+    return toolChoice;
+}
+
+/**
  * Strip tool definitions from the API request on the final recursion pass.
  * ST's Generate() stops processing tool calls at depth >= RECURSE_LIMIT, but
  * registerFunctionToolsOpenAI() still sends tool definitions unconditionally.
@@ -711,6 +781,28 @@ function cleanOrphanedToolInvocations() {
 function onChatCompletionSettingsReady(data) {
     if (!_generationInProgress) return;
 
+    // ── Anthropic format conversion ──────────────────────────────────
+    // ST's ToolManager registers tools in OpenAI function-calling format
+    // ({ type: "function", function: { ... } }). When the active backend
+    // is Anthropic, convert them to the Messages API format so the request
+    // doesn't get rejected with an "invalid input tag" error.
+    if (data.tools?.length && isAnthropicApi(data)) {
+        const hasOpenAIWrapped = data.tools.some(t => t?.type === 'function' && t.function);
+        if (hasOpenAIWrapped) {
+            data.tools = data.tools.map(convertToolToAnthropicFormat);
+            if (data.tool_choice !== undefined) {
+                const converted = convertToolChoiceToAnthropicFormat(data.tool_choice);
+                if (converted === undefined) {
+                    delete data.tool_choice;
+                } else {
+                    data.tool_choice = converted;
+                }
+            }
+            console.log(`[TunnelVision] Converted ${data.tools.length} tool(s) from OpenAI to Anthropic format`);
+        }
+    }
+
+    // ── Final-pass tool stripping ────────────────────────────────────
     const recurseLimit = ToolManager.RECURSE_LIMIT ?? 5;
     if (_toolRecursionDepth >= recurseLimit - 1) {
         if (data.tools) {
