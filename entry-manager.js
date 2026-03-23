@@ -27,6 +27,41 @@ import {
     setTrackerUid,
 } from './tree-store.js';
 
+// ─── World Info Data Cache ───────────────────────────────────────
+// Avoids repeated async loadWorldInfo calls in hot paths like scoring.
+// Populated by getCachedWorldInfo (async), read by getCachedWorldInfoSync.
+
+const _wiCache = new Map();
+
+/**
+ * Load and cache lorebook data. Use this to pre-warm the cache.
+ * @param {string} bookName
+ * @returns {Promise<Object|null>}
+ */
+export async function getCachedWorldInfo(bookName) {
+    const bookData = await loadWorldInfo(bookName);
+    if (bookData) _wiCache.set(bookName, bookData);
+    return bookData;
+}
+
+/**
+ * Get cached lorebook data synchronously. Returns null if not yet cached.
+ * Call getCachedWorldInfo first to populate.
+ * @param {string} bookName
+ * @returns {Object|null}
+ */
+export function getCachedWorldInfoSync(bookName) {
+    return _wiCache.get(bookName) || null;
+}
+
+/**
+ * Invalidate the cache for a specific book (call after writes).
+ * @param {string} bookName
+ */
+export function invalidateWorldInfoCache(bookName) {
+    _wiCache.delete(bookName);
+}
+
 /**
  * Create a new lorebook entry and assign it to a tree node.
  * @param {string} bookName - Lorebook name
