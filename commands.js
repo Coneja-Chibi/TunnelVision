@@ -11,8 +11,9 @@
  *   /tv-remember [content] — Save content to memory
  *   /tv-summarize [title]  — Create a scene summary
  *   /tv-forget [name]      — Forget/disable an entry
- *   /tv-merge [hint]       — Merge duplicate/related entries
+ *   /tv-merge [hint]       — Merge two specific related entries
  *   /tv-split [hint]       — Split a multi-topic entry
+ *   /tv-dedupe [lorebook]  — Batch-merge all duplicate clusters
  *   /tv-ingest [lorebook]  — Ingest recent chat messages (no generation)
  *
  * Settings consumed (from tree-store.js getSettings()):
@@ -24,11 +25,11 @@ import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 import { loadWorldInfo } from '../../../world-info.js';
-import { getSettings, getSelectedLorebook, getTree } from './tree-store.js';
+import { getSettings, getSelectedLorebook, getTree, createTreeNode, saveTree, findNodeById } from './tree-store.js';
 import { getActiveTunnelVisionBooks, resolveTargetBook } from './tool-registry.js';
 import { ingestChatMessages } from './tree-builder.js';
-import { createEntry, mergeEntries, splitEntry, forgetEntry, findEntryByUid } from './entry-manager.js';
-import { generateAnalytical, getStoryContext } from './agent-utils.js';
+import { createEntry, mergeEntries, splitEntry, forgetEntry, updateEntry, findEntryByUid } from './entry-manager.js';
+import { generateAnalytical, getStoryContext, trigramSimilarity } from './agent-utils.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -129,6 +130,20 @@ function registerSlashCommands() {
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
                 description: 'Entry name or UID to split',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+            }),
+        ],
+        returns: 'empty string',
+    }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-dedupe',
+        callback: wrapCallback(handleDedupe),
+        helpString: 'Batch-merge all duplicate/near-duplicate entries in a TunnelVision lorebook. Moves absorbed entries to a "Deduped" node for review.',
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'Target lorebook name (optional if only one active)',
                 typeList: [ARGUMENT_TYPE.STRING],
                 isRequired: false,
             }),
@@ -620,6 +635,236 @@ If no entry needs splitting, return { "uid": null, "reason": "No entries need sp
         );
     } catch (e) {
         toastr.error(`Split failed: ${e.message}`, 'TunnelVision');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dedupe handler — batch-merge all duplicate clusters
+// ---------------------------------------------------------------------------
+
+const DEDUPE_SIMILARITY_THRESHOLD = 0.55;
+const DEDUPE_MAX_CLUSTERS_PER_BATCH = 8;
+
+/**
+ * Find duplicate clusters using trigram similarity on content+title.
+ * Returns groups of 2+ entries that are near-duplicates of each other.
+ */
+function findDuplicateClusters(entries, threshold) {
+    // Union-Find for clustering
+    const parent = new Map();
+    function find(uid) {
+        if (!parent.has(uid)) parent.set(uid, uid);
+        if (parent.get(uid) !== uid) parent.set(uid, find(parent.get(uid)));
+        return parent.get(uid);
+    }
+    function union(a, b) {
+        const ra = find(a), rb = find(b);
+        if (ra !== rb) parent.set(ra, rb);
+    }
+
+    // Compare all pairs
+    for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+            const textA = `${entries[i].title} ${entries[i].content}`.toLowerCase();
+            const textB = `${entries[j].title} ${entries[j].content}`.toLowerCase();
+            if (trigramSimilarity(textA, textB) >= threshold) {
+                union(entries[i].uid, entries[j].uid);
+            }
+        }
+    }
+
+    // Group by cluster root
+    const clusters = new Map();
+    for (const entry of entries) {
+        const root = find(entry.uid);
+        if (!clusters.has(root)) clusters.set(root, []);
+        clusters.get(root).push(entry);
+    }
+
+    // Only return clusters with 2+ entries
+    return [...clusters.values()].filter(c => c.length >= 2);
+}
+
+/**
+ * Find or create a "Deduped" node under root for parking merged-away entries.
+ */
+function getOrCreateDedupedNode(bookName) {
+    const tree = getTree(bookName);
+    if (!tree?.root) return null;
+
+    // Look for existing Deduped node
+    for (const child of (tree.root.children || [])) {
+        if (child.label === 'Deduped') return { node: child, tree };
+    }
+
+    // Create one
+    const node = createTreeNode('Deduped', 'Entries absorbed during deduplication. Safe to delete.');
+    tree.root.children = tree.root.children || [];
+    tree.root.children.push(node);
+    saveTree(bookName, tree);
+    return { node, tree };
+}
+
+async function handleDedupe(_namedArgs, unnamedArg, { activeBooks }) {
+    const requested = String(unnamedArg || '').trim();
+    let bookName;
+
+    if (requested) {
+        bookName = activeBooks.find(b => b.toLowerCase() === requested.toLowerCase());
+        if (!bookName) {
+            toastr.warning(`Lorebook "${requested}" not found among active books.`, 'TunnelVision');
+            return;
+        }
+    } else {
+        bookName = resolveBook(activeBooks);
+    }
+    if (!bookName) return;
+
+    // Load all active entries
+    const bookData = await loadWorldInfo(bookName);
+    if (!bookData?.entries) {
+        toastr.warning(`No entries in "${bookName}".`, 'TunnelVision');
+        return;
+    }
+
+    const allEntries = [];
+    for (const entry of Object.values(bookData.entries)) {
+        if (entry.disable) continue;
+        allEntries.push({
+            uid: entry.uid,
+            title: (entry.comment || '').trim() || `Entry #${entry.uid}`,
+            content: (entry.content || '').trim(),
+        });
+    }
+
+    if (allEntries.length < 2) {
+        toastr.info('Not enough entries to deduplicate.', 'TunnelVision');
+        return;
+    }
+
+    toastr.info(`Scanning ${allEntries.length} entries for duplicates...`, 'TunnelVision');
+
+    const threshold = getSettings().vectorDedupThreshold || DEDUPE_SIMILARITY_THRESHOLD;
+    const clusters = findDuplicateClusters(allEntries, threshold);
+
+    if (clusters.length === 0) {
+        toastr.success('No duplicate clusters found — lorebook is clean.', 'TunnelVision');
+        return;
+    }
+
+    const totalDupes = clusters.reduce((sum, c) => sum + c.length, 0);
+    toastr.info(
+        `Found ${clusters.length} duplicate cluster(s) (${totalDupes} entries total). Merging...`,
+        'TunnelVision',
+    );
+
+    let mergedCount = 0;
+    let errorCount = 0;
+
+    // Process in batches to avoid overwhelming the LLM
+    for (let batchStart = 0; batchStart < clusters.length; batchStart += DEDUPE_MAX_CLUSTERS_PER_BATCH) {
+        const batch = clusters.slice(batchStart, batchStart + DEDUPE_MAX_CLUSTERS_PER_BATCH);
+
+        // Build prompt for this batch
+        const clusterDescriptions = batch.map((cluster, idx) => {
+            const entryLines = cluster.map(e => {
+                const preview = e.content.substring(0, 200).replace(/\n/g, ' ');
+                return `  - UID ${e.uid}: "${e.title}" — ${preview}`;
+            }).join('\n');
+            return `CLUSTER ${idx + 1} (${cluster.length} entries):\n${entryLines}`;
+        }).join('\n\n');
+
+        const prompt = `You are deduplicating a lorebook. For each cluster below, all entries cover the same topic.
+Pick the ONE best entry to keep (keep_uid) and write clean consolidated content that combines the best information from all entries in the cluster.
+
+${clusterDescriptions}
+
+Return JSON — an array with one object per cluster:
+[
+  {
+    "cluster": 1,
+    "keep_uid": <number>,
+    "remove_uids": [<numbers of all OTHER entries to absorb>],
+    "merged_title": "<clean consolidated title>",
+    "merged_content": "<consolidated content combining the best of all entries>"
+  }
+]`;
+
+        let parsed;
+        try {
+            const response = await generateAnalytical({ prompt });
+            parsed = parseJSON(response);
+        } catch (e) {
+            console.error('[TunnelVision] /tv-dedupe LLM batch failed:', e);
+            toastr.warning(`Batch ${batchStart + 1} LLM call failed: ${e.message}`, 'TunnelVision');
+            errorCount += batch.length;
+            continue;
+        }
+
+        if (!Array.isArray(parsed)) {
+            console.warn('[TunnelVision] /tv-dedupe: LLM did not return an array, skipping batch');
+            errorCount += batch.length;
+            continue;
+        }
+
+        // Execute merges for this batch
+        for (const instruction of parsed) {
+            if (!instruction?.keep_uid || !Array.isArray(instruction.remove_uids)) continue;
+
+            for (const removeUid of instruction.remove_uids) {
+                try {
+                    await mergeEntries(bookName, instruction.keep_uid, removeUid, {
+                        mergedContent: instruction.merged_content,
+                        mergedTitle: instruction.merged_title,
+                    });
+                    mergedCount++;
+
+                    // Move the disabled entry to Deduped node
+                    const dedupResult = getOrCreateDedupedNode(bookName);
+                    if (dedupResult) {
+                        const { node: dedupNode, tree } = dedupResult;
+                        dedupNode.entryUids = dedupNode.entryUids || [];
+                        dedupNode.entryUids.push(removeUid);
+                        saveTree(bookName, tree);
+                    }
+                } catch (e) {
+                    console.warn(`[TunnelVision] /tv-dedupe: merge UID ${removeUid} → ${instruction.keep_uid} failed:`, e.message);
+                    errorCount++;
+                }
+            }
+
+            // After merging all into the keeper, set the final merged content once
+            // (mergeEntries concatenates by default on each call, but we want the LLM's clean version)
+            if (instruction.merged_content && instruction.remove_uids.length > 0) {
+                try {
+                    await updateEntry(bookName, instruction.keep_uid, {
+                        content: instruction.merged_content,
+                        comment: instruction.merged_title,
+                    });
+                } catch { /* best effort — merge already succeeded */ }
+            }
+        }
+
+        if (batchStart + DEDUPE_MAX_CLUSTERS_PER_BATCH < clusters.length) {
+            toastr.info(
+                `Progress: ${mergedCount} merged so far, ${clusters.length - batchStart - DEDUPE_MAX_CLUSTERS_PER_BATCH} clusters remaining...`,
+                'TunnelVision',
+            );
+        }
+    }
+
+    if (mergedCount > 0) {
+        toastr.success(
+            `Deduplication complete: ${mergedCount} entries merged into their clusters. ` +
+            `${errorCount > 0 ? `${errorCount} error(s). ` : ''}` +
+            `Absorbed entries moved to "Deduped" node for review.`,
+            'TunnelVision',
+        );
+    } else {
+        toastr.warning(
+            `Deduplication finished but no merges succeeded (${errorCount} error(s)).`,
+            'TunnelVision',
+        );
     }
 }
 
