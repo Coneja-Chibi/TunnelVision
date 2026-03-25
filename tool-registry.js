@@ -8,6 +8,7 @@
 import { ToolManager } from '../../../tool-calling.js';
 import { selected_world_info, world_info, loadWorldInfo, METADATA_KEY } from '../../../world-info.js';
 import { characters, this_chid, chat_metadata } from '../../../../script.js';
+import { selected_group, groups } from '../../../group-chats.js';
 import { getCharaFilename } from '../../../utils.js';
 import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { isLorebookEnabled, getSettings, getTree, getBookDescription, syncTrackerUidsForLorebook, canReadBook, canWriteBook, isNativeInjectionBook } from './tree-store.js';
@@ -143,18 +144,22 @@ export function getActiveTunnelVisionBooks() {
         for (const name of selected_world_info) candidates.add(name);
     }
 
-    // 2. Character-attached lorebooks (primary + extraBooks via charLore)
-    if (this_chid !== undefined && this_chid !== null) {
-        const character = characters[this_chid];
-        const primaryBook = character?.data?.extensions?.world;
-        if (primaryBook) candidates.add(primaryBook);
-
-        const charFilename = getCharaFilename(this_chid);
-        const charLore = world_info?.charLore || [];
-        const charEntry = charLore.find(e => e.name === charFilename);
-        if (charEntry?.extraBooks) {
-            for (const name of charEntry.extraBooks) candidates.add(name);
+    // 2. Character-attached lorebooks
+    // In group chats, scan ALL group members instead of just this_chid
+    // (this_chid rotates per character and would flip active books mid-generation)
+    if (selected_group) {
+        const group = groups?.find(g => g.id === selected_group);
+        if (group?.members) {
+            const disabledMembers = new Set(group.disabled_members || []);
+            for (const memberAvatar of group.members) {
+                if (disabledMembers.has(memberAvatar)) continue;
+                const charIdx = characters.findIndex(c => c.avatar === memberAvatar);
+                if (charIdx < 0) continue;
+                _addCharacterBooks(candidates, charIdx);
+            }
         }
+    } else if (this_chid !== undefined && this_chid !== null) {
+        _addCharacterBooks(candidates, this_chid);
     }
 
     // 3. Chat-attached lorebook (native ST + CarrotKernel multi-book)
@@ -170,6 +175,24 @@ export function getActiveTunnelVisionBooks() {
         if (isLorebookEnabled(bookName)) active.push(bookName);
     }
     return active;
+}
+
+/**
+ * Add character-attached lorebooks (primary + extraBooks) to the candidates set.
+ * @param {Set<string>} candidates
+ * @param {number} charIdx - Character index in the characters array
+ */
+function _addCharacterBooks(candidates, charIdx) {
+    const character = characters[charIdx];
+    const primaryBook = character?.data?.extensions?.world;
+    if (primaryBook) candidates.add(primaryBook);
+
+    const charFilename = getCharaFilename(charIdx);
+    const charLore = world_info?.charLore || [];
+    const charEntry = charLore.find(e => e.name === charFilename);
+    if (charEntry?.extraBooks) {
+        for (const name of charEntry.extraBooks) candidates.add(name);
+    }
 }
 
 export async function inspectToolRuntimeState() {

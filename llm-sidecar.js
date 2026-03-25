@@ -29,6 +29,7 @@ const MODULE_NAME = 'TunnelVision';
 // Tripped on the first 403 from /api/secrets/find. Prevents repeated
 // attempts when allowKeysExposure is not enabled in ST's config.yaml.
 let _secretKeyFailed = false;
+let _secretKeyWarningShown = false; // only show the toast once per session
 
 const PROVIDER_MAP = {
     openai:       { format: 'openai',    endpoint: 'https://api.openai.com/v1/chat/completions',              secretKey: 'api_key_openai' },
@@ -85,6 +86,17 @@ export async function fetchSecretKey(secretKey) {
             if (response.status === 403) {
                 _secretKeyFailed = true;
                 console.warn(`[${MODULE_NAME}] Secret key access DENIED (403). allowKeysExposure is NOT enabled in config.yaml. Sidecar disabled for this session.`);
+                if (!_secretKeyWarningShown) {
+                    _secretKeyWarningShown = true;
+                    try {
+                        toastr.warning(
+                            'TunnelVision sidecar disabled: allowKeysExposure is not enabled in ST\'s config.yaml. ' +
+                            'Set allowKeysExposure: true and restart ST to use a separate LLM for TV operations.',
+                            'TunnelVision Sidecar',
+                            { timeOut: 10000 },
+                        );
+                    } catch { /* toastr may not be loaded yet */ }
+                }
             } else {
                 console.warn(`[${MODULE_NAME}] Secret key fetch failed: HTTP ${response.status} for "${secretKey}"`);
             }

@@ -80,7 +80,7 @@ export async function generateAnalytical({ prompt, systemPrompt = ANALYTICAL_SYS
             }
         }
     } catch (e) {
-        console.debug('[TunnelVision] Sidecar generation failed, falling back to generateRaw:', e.message);
+        console.warn('[TunnelVision] Sidecar generation failed, falling back to main API:', e.message);
     }
 
     const { generateRaw } = getContext();

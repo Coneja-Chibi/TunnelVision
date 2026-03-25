@@ -24,6 +24,7 @@ import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
 import { getSettings, isLorebookEnabled, setLorebookEnabled, isNativeInjectionBook } from './tree-store.js';
 import { preflightToolRuntimeState, registerTools } from './tool-registry.js';
+import { resetSearchLoopTracker, resetSelectiveRetrievalTracker } from './tools/search.js';
 import { buildNotebookPrompt, resetNotebookWriteGuard } from './tools/notebook.js';
 import { bindUIEvents, refreshUI } from './ui-controller.js';
 import { initActivityFeed } from './activity-feed.js';
@@ -183,17 +184,36 @@ function autoDetectLorebooks() {
     if (!world_names || world_names.length === 0) return;
 
     const context = getContext();
-    const charName = context?.name2 || '';
-    // Replace {{char}} macro
-    const resolved = pattern.replace(/\{\{char\}\}/gi, charName);
-    if (!resolved.trim()) return;
+
+    // In group chats, expand {{char}} against ALL group members' names
+    // instead of just name2 (which rotates per character)
+    const charNames = [];
+    if (context.groupId) {
+        const group = context.groups?.find(g => g.id === context.groupId);
+        if (group?.members) {
+            const disabledMembers = new Set(group.disabled_members || []);
+            for (const avatar of group.members) {
+                if (disabledMembers.has(avatar)) continue;
+                const char = context.characters?.find(c => c.avatar === avatar);
+                if (char?.name) charNames.push(char.name);
+            }
+        }
+    }
+    if (charNames.length === 0) {
+        charNames.push(context?.name2 || '');
+    }
 
     let autoEnabled = 0;
-    for (const bookName of world_names) {
-        if (bookName.includes(resolved) && !isLorebookEnabled(bookName)) {
-            setLorebookEnabled(bookName, true);
-            autoEnabled++;
-            console.log(`[TunnelVision] Auto-detected lorebook: "${bookName}" (pattern: "${resolved}")`);
+    for (const charName of charNames) {
+        const resolved = pattern.replace(/\{\{char\}\}/gi, charName);
+        if (!resolved.trim()) continue;
+
+        for (const bookName of world_names) {
+            if (bookName.includes(resolved) && !isLorebookEnabled(bookName)) {
+                setLorebookEnabled(bookName, true);
+                autoEnabled++;
+                console.log(`[TunnelVision] Auto-detected lorebook: "${bookName}" (pattern: "${resolved}")`);
+            }
         }
     }
     if (autoEnabled > 0) {
@@ -835,6 +855,8 @@ async function onGenerationStarted(type, opts, dryRun) {
         _toolRecursionDepth++;
     } else {
         _toolRecursionDepth = 0;
+        resetSearchLoopTracker();
+        resetSelectiveRetrievalTracker();
     }
 
     // Expose recursive state globally so presets, macros, and other extensions can
@@ -931,6 +953,10 @@ async function onGenerationStarted(type, opts, dryRun) {
  * Post-generation handler: run sidecar writer if enabled.
  * Fires after the chat model's response is received (MESSAGE_RECEIVED).
  */
+// Debounce timer for sidecar writer in group chats — prevents firing
+// once per group member by waiting for the last MESSAGE_RECEIVED.
+let _sidecarWriterDebounceTimer = null;
+
 async function onMessageReceived(_messageId, type) {
     console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${_messageId} type="${type}"`);
     // Clear generation guards BEFORE the sidecar writer runs, so that lorebook
@@ -945,6 +971,23 @@ async function onMessageReceived(_messageId, type) {
 
     const settings = getSettings();
     if (!settings.sidecarPostGenWriter || settings.globalEnabled === false) return;
+
+    // In group chats, debounce: wait 800ms after the last MESSAGE_RECEIVED
+    // before firing the sidecar writer, so we only run once after the
+    // final group member's message instead of N times.
+    const context = getContext();
+    if (context.groupId) {
+        if (_sidecarWriterDebounceTimer) clearTimeout(_sidecarWriterDebounceTimer);
+        _sidecarWriterDebounceTimer = setTimeout(async () => {
+            _sidecarWriterDebounceTimer = null;
+            try {
+                await runSidecarWriter();
+            } catch (err) {
+                console.error('[TunnelVision] Sidecar post-gen writer error (group):', err);
+            }
+        }, 800);
+        return;
+    }
 
     try {
         await runSidecarWriter();

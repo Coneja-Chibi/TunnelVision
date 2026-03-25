@@ -20,6 +20,67 @@ import {
 import { getReadableBooks } from '../tool-registry.js';
 import { getKeywordTriggeredUids } from '../index.js';
 
+// ─── Loop Detection ─────────────────────────────────────────────
+// Tracks node IDs called within the current generation turn.
+// If the same node is requested 3+ times, we break the loop by
+// returning guidance instead of the normal response.
+
+const _nodeCallCounts = new Map(); // node_id → call count this turn
+const LOOP_THRESHOLD = 3;
+
+// ─── Selective Retrieval Tracking ────────────────────────────────
+// When selective retrieval resolves specific UIDs, store them here
+// so smart-context can filter its candidates to match.
+
+const _selectivelyRetrievedUids = new Set();
+
+/**
+ * Get the set of UIDs the model explicitly selected this turn.
+ * Empty if no selective retrieval has happened yet.
+ */
+export function getSelectivelyRetrievedUids() {
+    return _selectivelyRetrievedUids;
+}
+
+/**
+ * Clear selective retrieval tracking. Call at GENERATION_STARTED.
+ */
+export function resetSelectiveRetrievalTracker() {
+    _selectivelyRetrievedUids.clear();
+}
+
+/**
+ * Reset the loop detector. Call at GENERATION_STARTED.
+ */
+export function resetSearchLoopTracker() {
+    _nodeCallCounts.clear();
+}
+
+/**
+ * Track a node_id call and return a loop-break message if threshold hit.
+ * @param {string} nodeId
+ * @returns {string|null} Loop-break message, or null if not looping
+ */
+function checkSearchLoop(nodeId) {
+    if (!nodeId) return null;
+    const count = (_nodeCallCounts.get(nodeId) || 0) + 1;
+    _nodeCallCounts.set(nodeId, count);
+    if (count >= LOOP_THRESHOLD) {
+        const sampleIds = _collectSampleNodeIds(4).filter(id => id !== nodeId);
+        const alternatives = sampleIds.length > 0
+            ? ` Try these other nodes instead: ${sampleIds.join(', ')}.`
+            : '';
+        return (
+            `You have searched node "${nodeId}" ${count} times this turn with the same result. ` +
+            `To find what you need, try one of these approaches:\n` +
+            `1. Use action "search" with a "query" keyword to search across all entries\n` +
+            `2. Use action "retrieve" to get the full content of this node\n` +
+            `3. Navigate to a different branch of the tree${alternatives}`
+        );
+    }
+    return null;
+}
+
 /**
  * Build a UID→entry lookup map from lorebook data.
  * Eliminates O(n²) iteration when resolving multiple UIDs.
@@ -675,6 +736,14 @@ CROSS-BOOK SEARCH: Use action "search" with a "query" to find entries by keyword
                 return 'No valid tree index found. The tree may still be loading — try again, or build a tree first using the TunnelVision settings panel.';
             }
 
+            // Loop detection: break degenerate loops where the model
+            // keeps calling the same node_id repeatedly
+            const loopNodeId = args.node_id || (Array.isArray(args.node_ids) ? args.node_ids[0] : null);
+            if (loopNodeId) {
+                const loopBreak = checkSearchLoop(loopNodeId);
+                if (loopBreak) return loopBreak;
+            }
+
             // Selective retrieval: resolve specific entries by UID
             if (selective && Array.isArray(args.entry_uids) && args.entry_uids.length > 0) {
                 return handleSelectiveEntryRetrieval(args.entry_uids);
@@ -716,6 +785,11 @@ async function handleSelectiveEntryRetrieval(entryUids) {
     const content = await resolveEntriesByUid(entryUids);
     if (!content) {
         return `No entries found for UIDs: ${entryUids.join(', ')}. Double-check the UIDs from the manifest — they must be numeric entry UIDs, not node IDs.`;
+    }
+    // Track which UIDs the model explicitly selected so smart-context
+    // can filter its candidates to only these entries
+    for (const uid of entryUids) {
+        _selectivelyRetrievedUids.add(Number(uid));
     }
     console.log(`[TunnelVision] Selective retrieval: ${entryUids.length} UID(s) requested`);
     return content;
