@@ -662,6 +662,12 @@ export function isTrackerTitle(title) {
     return TRACKER_TITLE_PREFIX.test(String(title || '').trim());
 }
 
+const SUMMARY_TITLE_PREFIX = /^\[(?:scene\s+)?summary[^\]]*\]/i;
+
+export function isSummaryTitle(title) {
+    return SUMMARY_TITLE_PREFIX.test(String(title || '').trim());
+}
+
 export function getTrackerUids(bookName) {
     return [...getTrackerSet(bookName)];
 }
