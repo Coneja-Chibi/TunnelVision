@@ -62,7 +62,7 @@ function getProviderInfo(apiSource) {
  * @param {string} secretKey - The secret key identifier (e.g. 'api_key_openai')
  * @returns {Promise<string|null>} The API key or null if unavailable
  */
-export async function fetchSecretKey(secretKey) {
+export async function fetchSecretKey(secretKey, secretId = null) {
     if (!secretKey) {
         console.warn(`[${MODULE_NAME}] fetchSecretKey called with no key identifier — provider may not be in PROVIDER_MAP`);
         return null;
@@ -78,7 +78,7 @@ export async function fetchSecretKey(secretKey) {
         const response = await fetch('/api/secrets/find', {
             method: 'POST',
             headers: getContext().getRequestHeaders(),
-            body: JSON.stringify({ key: secretKey }),
+            body: JSON.stringify({ key: secretKey, ...(secretId && { id: secretId }) }),
         });
 
         if (!response.ok) {
@@ -154,7 +154,7 @@ export function getSidecarModelLabel() {
 
 /**
  * Resolve the connection profile into everything needed for a direct API call.
- * @returns {{ provider: string, format: string, model: string, endpoint: string, secretKey: string|null }|null}
+ * @returns {{ provider: string, format: string, model: string, endpoint: string, secretKey: string|null, secretId: string|null }|null}
  */
 function resolveProfileConfig() {
     const settings = getSettings();
@@ -200,6 +200,7 @@ function resolveProfileConfig() {
         model: profile.model,
         endpoint,
         secretKey: info.secretKey,
+        secretId: profile['secret-id'] || null,  // add this
     };
 }
 
@@ -225,14 +226,14 @@ export async function sidecarGenerate({ prompt, systemPrompt }) {
     const temperature = settings.sidecarTemperature ?? 0.2;
     const maxTokens = settings.sidecarMaxTokens || 2048;
 
-    const { provider, format, model, endpoint, secretKey } = config;
+    const { provider, format, model, endpoint, secretKey, secretId } = config;
 
     if (!endpoint) {
         throw new Error(`No endpoint found for provider "${provider}". Set a Server URL in the connection profile.`);
     }
 
     // Fetch API key from ST's secrets store
-    const apiKey = await fetchSecretKey(secretKey);
+    const apiKey = await fetchSecretKey(secretKey, secretId);
     if (!apiKey) {
         throw new Error(
             `No API key found for "${provider}". Add your key in SillyTavern's API settings and ensure allowKeysExposure is enabled in config.yaml.`,
