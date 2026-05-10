@@ -23,7 +23,7 @@ import { getContext } from '../../../st-context.js';
 import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
 import { getSettings, isLorebookEnabled, setLorebookEnabled } from './tree-store.js';
-import { preflightToolRuntimeState, registerTools } from './tool-registry.js';
+import { preflightToolRuntimeState, registerTools, ALL_TOOL_NAMES } from './tool-registry.js';
 import { buildNotebookPrompt, resetNotebookWriteGuard } from './tools/notebook.js';
 import { bindUIEvents, refreshUI } from './ui-controller.js';
 import { initActivityFeed } from './activity-feed.js';
@@ -45,6 +45,9 @@ let _generationInProgress = false;
 // ST's Generate() increments depth internally but doesn't expose it to extensions,
 // so we mirror it here to know when we're on the final pass.
 let _toolRecursionDepth = 0;
+
+// When true, TunnelVision must stay out of the current swipe/regenerate request.
+let _skipToolPathGeneration = false;
 
 async function init() {
     // Ensure settings exist
@@ -124,6 +127,7 @@ async function init() {
             console.debug('[TunnelVision] GENERATION_ENDED — clearing generation guards');
             _generationInProgress = false;
             _toolRecursionDepth = 0;
+            _skipToolPathGeneration = false;
             _keywordTriggeredUids.clear();
             window.TunnelVision_isRecursiveToolPass = false;
         });
@@ -133,6 +137,7 @@ async function init() {
                 console.debug('[TunnelVision] GENERATION_STOPPED — clearing generation guards');
                 _generationInProgress = false;
                 _toolRecursionDepth = 0;
+                _skipToolPathGeneration = false;
                 window.TunnelVision_isRecursiveToolPass = false;
             });
         }
@@ -700,6 +705,55 @@ function cleanOrphanedToolInvocations() {
     }
 }
 
+
+function isSwipeLikeGeneration(type, opts = undefined) {
+    const values = [
+        type,
+        opts?.type,
+        opts?.originalType,
+        opts?.generationType,
+        opts?.source,
+        opts?.trigger,
+        opts?.reason,
+        opts?.mode,
+    ];
+
+    return values.some(value => {
+        if (typeof value !== 'string') return false;
+        const normalized = value.trim().toLowerCase();
+        return normalized === 'swipe' || normalized === 'regenerate';
+    });
+}
+
+function getToolName(tool) {
+    return tool?.function?.name || tool?.name || '';
+}
+
+function stripTunnelVisionToolsFromRequest(data) {
+    if (!Array.isArray(data?.tools) || data.tools.length === 0) {
+        return 0;
+    }
+
+    const originalCount = data.tools.length;
+    data.tools = data.tools.filter(tool => !ALL_TOOL_NAMES.includes(getToolName(tool)));
+    const removed = originalCount - data.tools.length;
+
+    if (removed === 0) {
+        return 0;
+    }
+
+    if (data.tools.length === 0) {
+        delete data.tools;
+    }
+
+    const toolChoiceName = data?.tool_choice?.function?.name || data?.tool_choice?.name || '';
+    if (toolChoiceName && ALL_TOOL_NAMES.includes(toolChoiceName)) {
+        delete data.tool_choice;
+    }
+
+    return removed;
+}
+
 /**
  * Detect whether the current API request targets an Anthropic-format endpoint.
  * Checks the model name in the request data and ST's chat completion source.
@@ -781,6 +835,15 @@ function convertToolChoiceToAnthropicFormat(toolChoice) {
 function onChatCompletionSettingsReady(data) {
     if (!_generationInProgress) return;
 
+    if (_skipToolPathGeneration) {
+        const removed = stripTunnelVisionToolsFromRequest(data);
+        if (removed > 0) {
+            console.debug(`[TunnelVision] Skipping TV tool path for swipe generation — stripped ${removed} TunnelVision tool(s) from request`);
+        } else {
+            console.debug('[TunnelVision] Skipping TV tool path for swipe generation');
+        }
+    }
+
     // ── Anthropic format conversion ──────────────────────────────────
     // ST's ToolManager registers tools in OpenAI function-calling format
     // ({ type: "function", function: { ... } }). When the active backend
@@ -842,6 +905,16 @@ async function onGenerationStarted(type, opts, dryRun) {
     if (dryRun) return;
 
     _generationInProgress = true;
+    _skipToolPathGeneration = isSwipeLikeGeneration(type, opts);
+
+    if (_skipToolPathGeneration) {
+        _toolRecursionDepth = 0;
+        window.TunnelVision_isRecursiveToolPass = false;
+        window.TunnelVision_toolRecursionDepth = 0;
+        setExtensionPrompt(TV_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        console.debug('[TunnelVision] Skipping TV tool path for swipe generation');
+        return;
+    }
 
     // Detect recursive tool-call passes FIRST, before any other work.
     // On recursive passes the last message is a tool_invocations system message
@@ -957,6 +1030,7 @@ async function onMessageReceived(_messageId, type) {
     // Clear generation guards BEFORE the sidecar writer runs, so that lorebook
     // writes triggered by the writer do not get blocked by the generation guard.
     _generationInProgress = false;
+    _skipToolPathGeneration = false;
     window.TunnelVision_isRecursiveToolPass = false;
 
     // Never run sidecar writer on swipes, continues, first messages, or non-generation events.
