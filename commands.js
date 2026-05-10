@@ -11,6 +11,7 @@
  *   /tv-merge [entries]    — Force merging entries
  *   /tv-split [entry]      — Force splitting an entry
  *   /tv-ingest [lorebook]  — Ingest recent chat messages (no generation)
+ *   /tv-commit             — Run the sidecar writer on the latest accepted assistant reply
  *
  * Settings consumed (from tree-store.js getSettings()):
  *   commandContextMessages number   default 50
@@ -24,6 +25,7 @@ import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/Sla
 import { getSettings, getSelectedLorebook } from './tree-store.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
 import { ingestChatMessages } from './tree-builder.js';
+import { runSidecarWriter, getManualSidecarCommitStatus } from './sidecar-writer.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -144,6 +146,13 @@ function registerSlashCommands() {
         ],
         returns: 'empty string',
     }));
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'tv-commit',
+        callback: wrapCallback(handleCommitCommand),
+        helpString: 'Run the TunnelVision sidecar writer manually on the latest accepted assistant message.',
+        returns: 'empty string',
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +263,38 @@ async function handleIngestCommand(_namedArgs, unnamedArg, { activeBooks }) {
     }
 
     await handleIngest(targetLorebook, getContextMessages());
+}
+
+async function handleCommitCommand() {
+    const eligibility = getManualSidecarCommitStatus();
+    if (!eligibility.ok) {
+        if (eligibility.reason === 'empty_assistant') {
+            toastr.warning('The latest selected assistant message is empty. Nothing to commit.', 'TunnelVision');
+        } else if (eligibility.reason === 'latest_not_assistant') {
+            toastr.warning('The latest non-system message must be an assistant message to use /tv-commit.', 'TunnelVision');
+        } else {
+            toastr.warning('No assistant message is available to commit.', 'TunnelVision');
+        }
+        return;
+    }
+
+    toastr.info('Running sidecar writer on the latest accepted assistant message...', 'TunnelVision');
+    const result = await runSidecarWriter({ force: true, includeLatestAssistant: true });
+    if (result?.status === 'completed') {
+        toastr.success('Sidecar writer finished.', 'TunnelVision');
+    } else if (result?.status === 'no_ops') {
+        toastr.info('No sidecar write operations were needed.', 'TunnelVision');
+    } else if (result?.status === 'no_sidecar') {
+        toastr.warning('Sidecar writer is not configured.', 'TunnelVision');
+    } else if (result?.status === 'no_books') {
+        toastr.warning('No readable TunnelVision lorebooks are available.', 'TunnelVision');
+    } else if (result?.status === 'no_tree') {
+        toastr.warning('No TunnelVision tree content is available to review.', 'TunnelVision');
+    } else if (result?.status === 'no_chat') {
+        toastr.warning('No recent chat context is available to commit.', 'TunnelVision');
+    } else if (result?.status === 'error') {
+        throw result.error || new Error('Sidecar writer failed.');
+    }
 }
 
 // ---------------------------------------------------------------------------
