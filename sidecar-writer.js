@@ -5,7 +5,7 @@
  *
  * Flow:
  *   1. Fires on MESSAGE_RECEIVED (after the chat model's full response)
- *   2. Builds context: tree overview + recent chat (including the new response)
+ *   2. Builds context: tree overview + recent chat history
  *   3. Sends to sidecar LLM asking what should be remembered or updated
  *   4. Parses structured JSON response with write operations
  *   5. Executes each operation via the tool action functions directly
@@ -19,8 +19,6 @@ import { getContext } from '../../../st-context.js';
 import { loadWorldInfo } from '../../../world-info.js';
 import {
     getTree,
-    findNodeById,
-    getAllEntryUids,
     getSettings,
 } from './tree-store.js';
 import { getReadableBooks, checkToolConfirmation, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME } from './tool-registry.js';
@@ -129,24 +127,24 @@ function findEntryByUid(entries, uid) {
 
 /**
  * Extract recent chat messages for the sidecar writer.
- * The latest AI response is excluded — the sidecar should only record facts
- * established by the USER, not potentially hallucinated AI roleplay content.
- * We include up to maxMessages of prior context (user + character turns) so the
- * sidecar understands the conversation flow, but the actual "new information"
- * it should act on comes only from the user's latest message(s).
+ * By default, the latest AI response is excluded. Manual commit mode can opt
+ * in to include the currently selected/latest assistant message as canon.
  * @param {number} maxMessages
+ * @param {{ includeLatestAssistant?: boolean }} [options]
  * @returns {string}
  */
-function extractRecentChat(maxMessages = 15) {
+function extractRecentChat(maxMessages = 15, options = {}) {
     const context = getContext();
     const chat = context.chat;
     if (!chat || chat.length === 0) return '';
+    const includeLatestAssistant = options.includeLatestAssistant === true;
 
     // Find the last non-system message — if it's from the character, exclude it
+    // unless manual commit mode explicitly marks it as accepted canon.
     let end = chat.length;
     for (let i = chat.length - 1; i >= 0; i--) {
         if (chat[i].is_system) continue;
-        if (!chat[i].is_user) {
+        if (!chat[i].is_user && !includeLatestAssistant) {
             end = i; // exclude this AI response
         }
         break;
@@ -161,13 +159,74 @@ function extractRecentChat(maxMessages = 15) {
         const msg = chat[i];
         if (msg.is_system) continue;
         const role = msg.is_user ? 'User' : 'Character';
-        const text = (msg.mes || '').substring(0, 800).replace(/\n/g, ' ');
+        const text = getSelectedMessageText(msg).substring(0, 800).replace(/\n/g, ' ');
         if (text.trim()) {
             lines.push(`${role}: ${text}`);
         }
     }
 
     return lines.join('\n');
+}
+
+function getSelectedMessageText(msg) {
+    if (!msg) return '';
+
+    if (Array.isArray(msg.swipes) && Number.isInteger(msg.swipe_id) && msg.swipe_id >= 0 && msg.swipe_id < msg.swipes.length) {
+        return String(msg.swipes[msg.swipe_id] || '');
+    }
+
+    return String(msg.mes || '');
+}
+
+function getLatestNonSystemMessage() {
+    const context = getContext();
+    const chat = context?.chat;
+    if (!Array.isArray(chat) || chat.length === 0) return null;
+
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const msg = chat[i];
+        if (msg?.is_system) continue;
+        return msg || null;
+    }
+
+    return null;
+}
+
+function getManualCommitEligibility() {
+    const latest = getLatestNonSystemMessage();
+    if (!latest) {
+        return { ok: false, reason: 'no_message' };
+    }
+
+    if (latest.is_user) {
+        return { ok: false, reason: 'latest_not_assistant' };
+    }
+
+    const text = getSelectedMessageText(latest).trim();
+    if (!text) {
+        return { ok: false, reason: 'empty_assistant' };
+    }
+
+    return { ok: true, message: latest, text };
+}
+
+const WRITER_AUTOMATIC_MODE_SUFFIX = `
+
+AUTOMATIC POST-GEN MODE:
+- The latest assistant/Character reply is excluded from the conversation history for this automatic run
+- Record facts the USER has established or confirmed, not speculative/fictional assistant content`;
+
+const WRITER_MANUAL_CANON_SUFFIX = `
+
+MANUAL COMMIT MODE:
+- You are seeing conversation HISTORY including the latest accepted Character response
+- Treat that latest Character reply as accepted canon for this manual commit, alongside facts the USER has established or confirmed
+- Do not invent beyond the conversation. Use the accepted latest Character reply only as canon for this manual commit`;
+
+function buildWriterSystemPrompt(includeLatestAssistant = false) {
+    return includeLatestAssistant
+        ? `${WRITER_SYSTEM_PROMPT}${WRITER_MANUAL_CANON_SUFFIX}`
+        : `${WRITER_SYSTEM_PROMPT}${WRITER_AUTOMATIC_MODE_SUFFIX}`;
 }
 
 // ─── Sidecar Prompt ──────────────────────────────────────────────
@@ -185,7 +244,7 @@ Rules:
 - "reorganize" moves entries between tree nodes or creates new categories for better organization
 - "split" divides one entry that covers multiple topics into two focused entries
 - Only create entries for significant, persistent information — not ephemeral dialogue
-- You are seeing conversation HISTORY only (the AI's latest response is excluded). Record facts the USER has established or confirmed, not speculative/fictional content
+- You are seeing conversation HISTORY according to the current writer mode. Record persistent facts/events only; do not invent beyond the conversation
 - Focus on: character development, relationship changes, plot events, world-building facts, status changes
 - If nothing significant happened, return: {"reasoning": "No significant events to record", "remember": [], "update": [], "merge": [], "summarize": [], "forget": [], "reorganize": [], "split": []}
 
@@ -248,13 +307,19 @@ Return ONLY the JSON object, no explanation.`;
  * Build the sidecar writer prompt.
  * @param {string} treeOverview
  * @param {string} recentChat
+ * @param {{ includeLatestAssistant?: boolean }} [options]
  * @returns {string}
  */
-function buildWriterPrompt(treeOverview, recentChat) {
+function buildWriterPrompt(treeOverview, recentChat, options = {}) {
+    const includeLatestAssistant = options.includeLatestAssistant === true;
+    const conversationLabel = includeLatestAssistant
+        ? 'CONVERSATION (including latest accepted assistant reply):'
+        : 'CONVERSATION (latest assistant reply excluded):';
+
     return `CURRENT LOREBOOK STATE:
 ${treeOverview}
 
-CONVERSATION (including latest response):
+${conversationLabel}
 ${recentChat}
 
 Based on the latest conversation turn, what lorebook operations (if any) should be performed? Return a JSON object.`;
@@ -563,42 +628,50 @@ async function executeWriteOps(ops, reasoning = '') {
  * Run sidecar post-generation writer.
  * Called after MESSAGE_RECEIVED in index.js.
  *
+ * @param {{ force?: boolean, includeLatestAssistant?: boolean }} [options]
  * @returns {Promise<void>}
  */
-export async function runSidecarWriter() {
+export async function runSidecarWriter(options = {}) {
     const settings = getSettings();
+    const force = options.force === true;
+    const includeLatestAssistant = options.includeLatestAssistant === true;
 
     // Guard: must be enabled and sidecar must be configured
-    if (!settings.sidecarPostGenWriter) return;
+    if (!force && !settings.sidecarPostGenWriter) {
+        return { ok: false, ran: false, status: 'disabled' };
+    }
     if (!isSidecarConfigured()) {
         console.debug('[TunnelVision] Sidecar post-gen writer enabled but no sidecar configured — skipping');
-        return;
+        return { ok: false, ran: false, status: 'no_sidecar' };
     }
 
     const activeBooks = getReadableBooks();
-    if (activeBooks.length === 0) return;
+    if (activeBooks.length === 0) {
+        return { ok: false, ran: false, status: 'no_books' };
+    }
 
     // Build tree overview (includes entry titles for update reference)
     const treeOverview = await buildWriterTreeOverview();
     if (!treeOverview.trim()) {
         console.debug('[TunnelVision] Sidecar post-gen writer: no tree content');
-        return;
+        return { ok: false, ran: false, status: 'no_tree' };
     }
 
-    // Extract recent chat including the new response
+    // Extract recent chat history. Manual commit mode can include the latest
+    // accepted assistant reply as canon for this one run.
     const contextMessages = settings.sidecarWriterContextMessages ?? 15;
-    const recentChat = extractRecentChat(contextMessages);
+    const recentChat = extractRecentChat(contextMessages, { includeLatestAssistant });
     if (!recentChat.trim()) {
         console.debug('[TunnelVision] Sidecar post-gen writer: no recent chat context');
-        return;
+        return { ok: false, ran: false, status: 'no_chat' };
     }
 
     try {
         // Ask sidecar what to write
-        const prompt = buildWriterPrompt(treeOverview, recentChat);
+        const prompt = buildWriterPrompt(treeOverview, recentChat, { includeLatestAssistant });
         const response = await sidecarGenerate({
             prompt,
-            systemPrompt: WRITER_SYSTEM_PROMPT,
+            systemPrompt: buildWriterSystemPrompt(includeLatestAssistant),
         });
 
         const _rawModel = getSidecarModelLabel() || 'unknown';
@@ -609,7 +682,7 @@ export async function runSidecarWriter() {
         const { ops, reasoning } = parseWriteOps(response);
         if (ops.length === 0) {
             console.log('[TunnelVision] Sidecar post-gen writer: no write operations needed');
-            return;
+            return { ok: true, ran: true, status: 'no_ops', succeeded: 0, failed: 0, attempted: 0 };
         }
 
         // Cap total operations
@@ -657,7 +730,26 @@ export async function runSidecarWriter() {
         }
         console.log('Results:', results);
         console.groupEnd();
+        return {
+            ok: true,
+            ran: true,
+            status: 'completed',
+            succeeded,
+            failed,
+            attempted: capped.length,
+            results,
+        };
     } catch (error) {
         console.error('[TunnelVision] Sidecar post-gen writer failed:', error);
+        return {
+            ok: false,
+            ran: true,
+            status: 'error',
+            error,
+        };
     }
+}
+
+export function getManualSidecarCommitStatus() {
+    return getManualCommitEligibility();
 }
