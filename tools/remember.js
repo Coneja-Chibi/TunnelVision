@@ -11,7 +11,7 @@
 import { loadWorldInfo } from '../../../../world-info.js';
 import { getSettings } from '../tree-store.js';
 import { createEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
+import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 import { getLanguageInstruction } from '../agent-utils.js';
 
 export const TOOL_NAME = 'TunnelVision_Remember';
@@ -99,7 +99,7 @@ async function findSimilarEntries(bookName, newContent, newTitle, threshold) {
  * @returns {Object}
  */
 export function getDefinition() {
-    const bookDesc = getBookListWithDescriptions();
+    const bookDesc = getBookListWithDescriptions({ writableOnly: true });
 
     return {
         name: TOOL_NAME,
@@ -181,7 +181,7 @@ Save entries to the lorebook where they belong based on the descriptions above. 
         shouldRegister: async () => {
             const settings = getSettings();
             if (settings.globalEnabled === false) return false;
-            return getActiveTunnelVisionBooks().length > 0;
+            return getWritableBooks().length > 0;
         },
         stealth: false,
     };

@@ -7,7 +7,7 @@
 
 import { getTree, findNodeById, getSettings, getAllEntryUids } from '../tree-store.js';
 import { moveEntry, createCategory, listNodeEntries } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
+import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_Reorganize';
 export const COMPACT_DESCRIPTION = 'Move entries between tree categories or create new categories for better organization.';
@@ -17,7 +17,7 @@ export const COMPACT_DESCRIPTION = 'Move entries between tree categories or crea
  * @returns {Object}
  */
 export function getDefinition() {
-    const bookDesc = getBookListWithDescriptions();
+    const bookDesc = getBookListWithDescriptions({ writableOnly: true });
 
     return {
         name: TOOL_NAME,
@@ -131,7 +131,7 @@ ${bookDesc}`,
         shouldRegister: async () => {
             const settings = getSettings();
             if (settings.globalEnabled === false) return false;
-            return getActiveTunnelVisionBooks().length > 0;
+            return getWritableBooks().length > 0;
         },
         stealth: false,
     };

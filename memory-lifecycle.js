@@ -48,6 +48,7 @@ import {
   recordEntryVersion,
   getEntryTurnIndex,
   setEntrySupersedes,
+  getEntryTemporal,
 } from "./entry-manager.js";
 import { loadWorldInfo, saveWorldInfo } from "../../../world-info.js";
 import {
@@ -266,12 +267,14 @@ export async function runLifecycleMaintenance(force = false) {
     }
 
     if (!task.cancelled) {
-      let maxUid = 0;
+      let maxOrderValue = 0;
       for (const bookName of activeBooks) {
         const bd = await getCachedWorldInfo(bookName);
         if (!bd?.entries) continue;
         for (const key of Object.keys(bd.entries)) {
-          if (bd.entries[key].uid > maxUid) maxUid = bd.entries[key].uid;
+          const entry = bd.entries[key];
+          if (entry.disable) continue;
+          maxOrderValue = Math.max(maxOrderValue, getEntryOrderValue(bookName, entry.uid));
         }
       }
 
@@ -302,7 +305,7 @@ export async function runLifecycleMaintenance(force = false) {
         lastRunMsgIdx: (getContext().chat?.length || 1) - 1,
         lastRunAt: Date.now(),
         lastResult: result,
-        lastMaxUid: maxUid,
+        lastMaxUid: maxOrderValue,
         runCount,
         lastEntryCount: totalEntries,
       });
@@ -386,14 +389,22 @@ export async function runLifecycleMaintenance(force = false) {
  * @param {string} bookName
  * @returns {Array<{uid: number, title: string, content: string}>}
  */
+function getEntryOrderValue(bookName, uid) {
+  const turn = getEntryTurnIndex(bookName, uid);
+  if (turn >= 0) return turn;
+  const temporal = getEntryTemporal(bookName, uid);
+  if (Number.isFinite(temporal?.created)) return Number(temporal.created);
+  return Number(uid) || 0;
+}
+
 function buildLifecycleBatch(allEntries, bookName) {
   if (allEntries.length <= LIFECYCLE_BATCH_LIMIT) return allEntries;
 
   const state = getLifecycleState();
   const lastRunUidThreshold = state?.lastMaxUid ?? 0;
 
-  const newEntries = allEntries.filter((e) => e.uid > lastRunUidThreshold);
-  const oldEntries = allEntries.filter((e) => e.uid <= lastRunUidThreshold);
+  const newEntries = allEntries.filter((e) => getEntryOrderValue(bookName, e.uid) > lastRunUidThreshold);
+  const oldEntries = allEntries.filter((e) => getEntryOrderValue(bookName, e.uid) <= lastRunUidThreshold);
 
   const selected = new Set(newEntries.map((e) => e.uid));
   let budget = LIFECYCLE_BATCH_LIMIT - selected.size;
@@ -494,18 +505,18 @@ async function findAndMergeDuplicates(bookName, bookData, chatId) {
     "Perform TWO checks:",
     "",
     "1. DUPLICATES: Identify pairs that are genuinely about the SAME topic/entity and contain overlapping information that should be consolidated.",
-    '2. CONTRADICTIONS: Identify pairs where one fact directly contradicts another about the same subject (e.g. "Elena lives in Port Alara" vs "Elena moved to the capital"). The NEWER entry (higher UID) is assumed to have more recent/accurate info.',
+    '2. CONTRADICTIONS: Identify pairs where one fact directly contradicts another about the same subject (e.g. "Elena lives in Port Alara" vs "Elena moved to the capital").',
     "",
     `[Entries in "${bookName}"]`,
     entryList,
     "",
     "For DUPLICATES: decide which entry to KEEP (more complete) and provide merged content combining the best of both.",
-    "For CONTRADICTIONS: the entry with the HIGHER UID is newer and takes precedence. Provide resolved content that reflects the current truth. The older (lower UID) entry will be superseded.",
+    "For CONTRADICTIONS: provide resolved content that reflects the current truth. If recency is unclear from content, make the best supported choice and explain it briefly.",
     "",
     "Respond with a JSON array. If nothing found, respond with [].",
     'Format: [{"type": "duplicate"|"contradiction", "keep_uid": 123, "remove_uid": 456, "merged_title": "best title", "merged_content": "resolved content", "reason": "brief reason"}]',
     "",
-    "For contradictions: keep_uid = the NEWER entry (higher UID), remove_uid = the OLDER entry (lower UID).",
+    "For contradictions: keep_uid = the entry that should remain current, remove_uid = the outdated entry.",
     "Only flag genuine duplicates or direct contradictions — not entries that merely reference the same character in different contexts.",
     'Different facts about the same character (e.g. "Elena is brave" and "Elena lives in Port Alara") are NOT contradictions.',
     "Limit to at most 3 duplicate pairs + 3 contradiction pairs per run.",
@@ -957,14 +968,16 @@ async function runConsistencyAudit(activeBooks, chatId) {
       const entry = bookData.entries[key];
       if (entry.disable) continue;
       if (isSystemEntry(entry)) continue;
+      const orderValue = getEntryOrderValue(bookName, entry.uid);
       allFacts.push({
         uid: entry.uid,
+        orderValue,
         title: entry.comment || "",
         content: (entry.content || "").substring(0, 200),
       });
     }
   }
-  allFacts.sort((a, b) => b.uid - a.uid);
+  allFacts.sort((a, b) => b.orderValue - a.orderValue);
   const recentFacts = allFacts.slice(0, MAX_FACTS_FOR_AUDIT);
 
   // Gather world state

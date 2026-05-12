@@ -14,7 +14,7 @@
 
 import { getTree, findNodeById, createTreeNode, saveTree, getSettings } from '../tree-store.js';
 import { createEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
+import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 import { markAutoSummaryComplete } from '../auto-summary.js';
 import { getLanguageInstruction } from '../agent-utils.js';
 import { getContext } from '../../../../st-context.js';
@@ -25,6 +25,7 @@ export const COMPACT_DESCRIPTION = 'Create a scene or event summary to preserve 
 
 const SUMMARIES_NODE_LABEL = 'Summaries';
 const WATERMARK_KEY = 'tunnelvision_summary_watermark';
+const PENDING_HIDE_KEY = 'tunnelvision_pending_summary_hide';
 
 /**
  * Get the last-summarized message ID watermark for the current chat.
@@ -46,14 +47,13 @@ export function setWatermark(messageId) {
 }
 
 /**
- * Hide messages covered by a summary, using either messages_back or the watermark.
- * Exported so auto-summary can also call it.
+ * Compute the message range that can be hidden after a summary.
  * @param {number|undefined} messagesBack - How many messages back the summary covers.
  * @param {number|undefined} overrideStart - Explicit start message ID (used by auto-summary).
  * @param {number|undefined} overrideEnd - Explicit end message ID (used by auto-summary).
- * @returns {Promise<string|null>} Status message or null if nothing was hidden.
+ * @returns {{ start: number, end: number, visibleCount: number, currentMsgId: number }|null}
  */
-export async function hideSummarizedMessages(messagesBack, overrideStart, overrideEnd) {
+function getSummarizedHideRange(messagesBack, overrideStart, overrideEnd) {
     const settings = getSettings();
     if (!settings.autoHideSummarized) return null;
 
@@ -106,13 +106,77 @@ export async function hideSummarizedMessages(messagesBack, overrideStart, overri
     }
     if (visibleCount === 0) return null;
 
+    return { start: hideStart, end: hideEnd, visibleCount, currentMsgId };
+}
+
+function setPendingSummaryHide(range) {
+    if (!range) return;
+    const context = getContext();
+    if (!context.chatMetadata) return;
+    context.chatMetadata[PENDING_HIDE_KEY] = {
+        start: range.start,
+        end: range.end,
+        visibleCount: range.visibleCount,
+        currentMsgId: range.currentMsgId,
+    };
+    context.saveMetadataDebounced?.();
+}
+
+/**
+ * Hide messages covered by a summary, using either messages_back or the watermark.
+ * Exported so auto-summary can also call it.
+ * @param {number|undefined} messagesBack - How many messages back the summary covers.
+ * @param {number|undefined} overrideStart - Explicit start message ID (used by auto-summary).
+ * @param {number|undefined} overrideEnd - Explicit end message ID (used by auto-summary).
+ * @returns {Promise<string|null>} Status message or null if nothing was hidden.
+ */
+export async function hideSummarizedMessages(messagesBack, overrideStart, overrideEnd) {
+    const range = getSummarizedHideRange(messagesBack, overrideStart, overrideEnd);
+    if (!range) return null;
+
     try {
-        await hideChatMessageRange(hideStart, hideEnd, false);
-        setWatermark(hideEnd);
-        console.log(`[TunnelVision] Hid messages ${hideStart}-${hideEnd} (${visibleCount} visible) after summary`);
-        return `Hidden ${visibleCount} summarized messages (${hideStart}-${hideEnd}).`;
+        await hideChatMessageRange(range.start, range.end, false);
+        setWatermark(range.end);
+        console.log(`[TunnelVision] Hid messages ${range.start}-${range.end} (${range.visibleCount} visible) after summary`);
+        return `Hidden ${range.visibleCount} summarized messages (${range.start}-${range.end}).`;
     } catch (e) {
         console.error('[TunnelVision] Failed to hide summarized messages:', e);
+        return null;
+    }
+}
+
+export async function flushPendingSummaryHide() {
+    const context = getContext();
+    const pending = context.chatMetadata?.[PENDING_HIDE_KEY];
+    if (!pending) return null;
+
+    delete context.chatMetadata[PENDING_HIDE_KEY];
+    context.saveMetadataDebounced?.();
+
+    if (!getSettings().autoHideSummarized) return null;
+    const chat = context.chat;
+    if (!chat || pending.start > pending.end) return null;
+
+    const maxSafeEnd = Math.min(Number(pending.end), chat.length - 2);
+    const start = Math.max(1, Number(pending.start));
+    if (!Number.isFinite(start) || !Number.isFinite(maxSafeEnd) || start > maxSafeEnd) return null;
+
+    let visibleCount = 0;
+    for (let i = start; i <= maxSafeEnd; i++) {
+        if (chat[i] && !chat[i].is_system) visibleCount++;
+    }
+    if (visibleCount === 0) {
+        setWatermark(maxSafeEnd);
+        return null;
+    }
+
+    try {
+        await hideChatMessageRange(start, maxSafeEnd, false);
+        setWatermark(maxSafeEnd);
+        console.log(`[TunnelVision] Hid messages ${start}-${maxSafeEnd} (${visibleCount} visible) after final response`);
+        return `Hidden ${visibleCount} summarized messages (${start}-${maxSafeEnd}).`;
+    } catch (e) {
+        console.error('[TunnelVision] Failed to flush pending summarized messages:', e);
         return null;
     }
 }
@@ -153,7 +217,7 @@ export function ensureSummariesNode(bookName) {
  * @returns {Object}
  */
 export function getDefinition() {
-    const bookDesc = getBookListWithDescriptions();
+    const bookDesc = getBookListWithDescriptions({ writableOnly: true });
 
     return {
         name: TOOL_NAME,
@@ -281,10 +345,13 @@ When you notice related events forming a pattern or storyline, group them into "
                     response += ` Arc: "${arcLabel}".`;
                 }
 
-                // Hide summarized messages if enabled
-                const hideResult = await hideSummarizedMessages(args.messages_back);
-                if (hideResult) {
-                    response += ` ${hideResult}`;
+                // Defer hiding until after the final narrative response. Hiding
+                // during a tool-call pass changes the context for ST's recursive
+                // generation and can make the model continue from an old scene.
+                const hideRange = getSummarizedHideRange(args.messages_back);
+                if (hideRange) {
+                    setPendingSummaryHide(hideRange);
+                    response += ` ${hideRange.visibleCount} summarized messages will be hidden after the response.`;
                 }
 
                 return response;
@@ -297,7 +364,7 @@ When you notice related events forming a pattern or storyline, group them into "
         shouldRegister: async () => {
             const settings = getSettings();
             if (settings.globalEnabled === false) return false;
-            return getActiveTunnelVisionBooks().length > 0;
+            return getWritableBooks().length > 0;
         },
         stealth: false,
     };

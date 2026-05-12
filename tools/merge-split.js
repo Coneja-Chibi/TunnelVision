@@ -10,7 +10,7 @@
 
 import { getSettings } from '../tree-store.js';
 import { mergeEntries, splitEntry, findEntry } from '../entry-manager.js';
-import { getActiveTunnelVisionBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
+import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 
 export const TOOL_NAME = 'TunnelVision_MergeSplit';
 export const COMPACT_DESCRIPTION = 'Merge two overlapping entries into one, or split a bloated entry into focused pieces.';
@@ -20,7 +20,7 @@ export const COMPACT_DESCRIPTION = 'Merge two overlapping entries into one, or s
  * @returns {Object}
  */
 export function getDefinition() {
-    const bookDesc = getBookListWithDescriptions();
+    const bookDesc = getBookListWithDescriptions({ writableOnly: true });
 
     return {
         name: TOOL_NAME,
@@ -171,7 +171,7 @@ ${bookDesc}`,
         shouldRegister: async () => {
             const settings = getSettings();
             if (settings.globalEnabled === false) return false;
-            return getActiveTunnelVisionBooks().length > 0;
+            return getWritableBooks().length > 0;
         },
         stealth: false,
     };

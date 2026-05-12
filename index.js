@@ -26,6 +26,7 @@ import { getSettings, isLorebookEnabled, setLorebookEnabled, isNativeInjectionBo
 import { preflightToolRuntimeState, registerTools } from './tool-registry.js';
 import { resetSearchLoopTracker, resetSelectiveRetrievalTracker } from './tools/search.js';
 import { buildNotebookPrompt, resetNotebookWriteGuard } from './tools/notebook.js';
+import { flushPendingSummaryHide } from './tools/summarize.js';
 import { bindUIEvents, refreshUI } from './ui-controller.js';
 import { initActivityFeed } from './activity-feed.js';
 import { initCommands } from './commands.js';
@@ -47,6 +48,7 @@ let _generationInProgress = false;
 // ST's Generate() increments depth internally but doesn't expose it to extensions,
 // so we mirror it here to know when we're on the final pass.
 let _toolRecursionDepth = 0;
+let _skipPreCommandGeneration = false;
 
 async function init() {
     // Ensure settings exist
@@ -115,6 +117,9 @@ async function init() {
     if (event_types.GENERATION_STARTED) {
         eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
     }
+    if (event_types.GENERATION_AFTER_COMMANDS) {
+        eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onGenerationAfterCommands);
+    }
 
     // Strip tool definitions on the final recursion pass so the model writes narrative
     // instead of making tool calls that ST will ignore (depth >= RECURSE_LIMIT).
@@ -129,6 +134,7 @@ async function init() {
             console.debug('[TunnelVision] GENERATION_ENDED — clearing generation guards');
             _generationInProgress = false;
             _toolRecursionDepth = 0;
+            _skipPreCommandGeneration = false;
             _keywordTriggeredUids.clear();
             window.TunnelVision_isRecursiveToolPass = false;
         });
@@ -138,6 +144,7 @@ async function init() {
                 console.debug('[TunnelVision] GENERATION_STOPPED — clearing generation guards');
                 _generationInProgress = false;
                 _toolRecursionDepth = 0;
+                _skipPreCommandGeneration = false;
                 window.TunnelVision_isRecursiveToolPass = false;
             });
         }
@@ -148,10 +155,8 @@ async function init() {
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
     }
 
-    // Clean up orphaned tool invocations when messages are deleted
-    if (event_types.MESSAGE_DELETED) {
-        eventSource.on(event_types.MESSAGE_DELETED, cleanOrphanedToolInvocations);
-    }
+    // Orphaned tool invocations are cleaned during generation preflight. Doing
+    // it directly from MESSAGE_DELETED mutates chat without updating ST's DOM.
 
     // Refresh connection profile dropdown when profiles change
     if (event_types.CONNECTION_PROFILE_CREATED) {
@@ -829,6 +834,21 @@ function onChatCompletionSettingsReady(data) {
     }
 }
 
+function isPendingSlashCommandGeneration(type) {
+    if (type === 'quiet' || type === 'regenerate' || type === 'swipe') return false;
+    try {
+        const text = String($('#send_textarea').val() || '').trimStart();
+        return text.startsWith('/');
+    } catch {
+        return false;
+    }
+}
+
+function onGenerationAfterCommands(_type, _opts, dryRun) {
+    if (dryRun) return;
+    _skipPreCommandGeneration = false;
+}
+
 /**
  * Inject or clear the mandatory tool call system prompt before each generation.
  * Runs before ST assembles the next request, so it can validate TV tool state first.
@@ -840,6 +860,17 @@ async function onGenerationStarted(type, opts, dryRun) {
     // GENERATION_ENDED to clear it, so it would stay true forever and block tool re-registration.
     if (dryRun) return;
 
+    if (isPendingSlashCommandGeneration(type)) {
+        _skipPreCommandGeneration = true;
+        _generationInProgress = false;
+        _toolRecursionDepth = 0;
+        window.TunnelVision_isRecursiveToolPass = false;
+        setExtensionPrompt(TV_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        console.debug('[TunnelVision] Pending slash command detected — skipping pre-command TV sidecar/tool work');
+        return;
+    }
+
+    _skipPreCommandGeneration = false;
     _generationInProgress = true;
 
     // Detect recursive tool-call passes FIRST, before any other work.
@@ -914,6 +945,7 @@ async function onGenerationStarted(type, opts, dryRun) {
     if (
         settings.globalEnabled !== false
         && settings.mandatoryTools
+        && ToolManager.canPerformToolCalls(type)
         && runtimeState?.activeBooks?.length > 0
         && runtimeState.expectedToolNames.length > 0
         && runtimeState.eligibleToolNames.length > 0
@@ -931,6 +963,12 @@ async function onGenerationStarted(type, opts, dryRun) {
             && runtimeState.eligibleToolNames.length === 0
         ) {
             console.warn('[TunnelVision] Mandatory tools enabled, but no eligible TunnelVision tools are available for this generation.');
+        } else if (
+            settings.globalEnabled !== false
+            && settings.mandatoryTools
+            && !ToolManager.canPerformToolCalls(type)
+        ) {
+            console.warn(`[TunnelVision] Mandatory tools enabled, but ST cannot perform tool calls for generation type "${type}".`);
         }
     }
 
@@ -962,7 +1000,14 @@ async function onMessageReceived(_messageId, type) {
     // Clear generation guards BEFORE the sidecar writer runs, so that lorebook
     // writes triggered by the writer do not get blocked by the generation guard.
     _generationInProgress = false;
+    _skipPreCommandGeneration = false;
     window.TunnelVision_isRecursiveToolPass = false;
+
+    try {
+        await flushPendingSummaryHide();
+    } catch (err) {
+        console.error('[TunnelVision] Failed to flush pending summary hide:', err);
+    }
 
     // Never run sidecar writer on swipes, continues, first messages, or non-generation events.
     // Only run on normal 'normal' generation completions.

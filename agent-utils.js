@@ -117,6 +117,19 @@ export function getLanguageInstruction() {
     return ` Write in ${lang.trim()}.`;
 }
 
+/**
+ * Append the user-configured background LLM prompt addendum to a system prompt.
+ * This applies to non-chat TV calls such as tree build, ingest, sidecar retrieval,
+ * and post-generation sidecar writing.
+ * @param {string} systemPrompt
+ * @returns {string}
+ */
+export function applyBackgroundPromptAddendum(systemPrompt) {
+    const addendum = getSettings().backgroundPromptAddendum;
+    if (!addendum || !addendum.trim()) return systemPrompt;
+    return `${systemPrompt}\n\n## USER BACKGROUND LLM INSTRUCTIONS\n${addendum.trim()}`;
+}
+
 // ── Analytical LLM Generation ─────────────────────────────────────
 
 const THINK_BLOCK_RE = /<think[\s\S]*?<\/think>/gi;
@@ -140,6 +153,8 @@ const ANALYTICAL_SYSTEM_PROMPT = [
  * @returns {Promise<string>}
  */
 export async function generateAnalytical({ prompt, systemPrompt = ANALYTICAL_SYSTEM_PROMPT }) {
+    systemPrompt = applyBackgroundPromptAddendum(systemPrompt);
+
     // Append language directive if configured
     const langDirective = buildLanguageDirective();
     if (langDirective) systemPrompt += langDirective;

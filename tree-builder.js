@@ -23,6 +23,7 @@ import {
     getAllEntryUids,
     getSettings,
 } from './tree-store.js';
+import { applyBackgroundPromptAddendum } from './agent-utils.js';
 
 /**
  * Granularity presets control how aggressively the builder splits entries.
@@ -317,7 +318,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     const firstPrompt = buildCategorizationPrompt(lorebookName, chunks[0], activeEntries.length, allEntryManifest);
     const firstResponse = await generateRaw({
         prompt: firstPrompt,
-        systemPrompt: 'You are a categorization assistant. Respond ONLY with valid JSON, no commentary.',
+        systemPrompt: applyBackgroundPromptAddendum('You are a categorization assistant. Respond ONLY with valid JSON, no commentary.'),
     });
     if (!firstResponse) throw new Error('LLM returned empty response for tree categorization.');
 
@@ -335,7 +336,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
                 const contPrompt = buildContinuationPrompt(lorebookName, chunks[chunkIdx], existingCategories, activeEntries.length);
                 return generateRaw({
                     prompt: contPrompt,
-                    systemPrompt: 'You are a categorization assistant. Respond ONLY with valid JSON, no commentary.',
+                    systemPrompt: applyBackgroundPromptAddendum('You are a categorization assistant. Respond ONLY with valid JSON, no commentary.'),
                 });
             });
         }
@@ -620,7 +621,7 @@ async function _generateSummariesForTree(rootNode, lorebookName, _isRoot = true,
 
         return generateRaw({
             prompt,
-            systemPrompt: 'You are a summarization assistant. Return only the requested output, no commentary.',
+            systemPrompt: applyBackgroundPromptAddendum('You are a summarization assistant. Return only the requested output, no commentary.'),
         }).then(response => ({ batchIdx, batch, response }))
             .catch(e => {
                 console.warn(`[TunnelVision] Summary batch ${batchIdx + 1} failed:`, e);
@@ -710,7 +711,7 @@ async function generateBookSummary(rootNode, lorebookName) {
         const totalEntries = getAllEntryUids(rootNode).length;
         const summary = await generateRaw({
             prompt: `This lorebook "${lorebookName}" has ${totalEntries} entries organized into these categories:\n${categoryList}\n\nWrite a brief 1-2 sentence description of what this lorebook contains overall — what kind of information does it store? Return ONLY the description.`,
-            systemPrompt: 'You are a summarization assistant. Return only the requested description, no commentary.',
+            systemPrompt: applyBackgroundPromptAddendum('You are a summarization assistant. Return only the requested description, no commentary.'),
         });
         if (summary) {
             rootNode.summary = summary.trim();
@@ -758,7 +759,7 @@ async function subdivideLargeNodes(node, bookData, totalEntryCount = 0, _depth =
                 const entryList = nodeEntries.map(e => `  ${formatEntryForLLM(e, detail)}`).join('\n');
                 const response = await generateRaw({
                     prompt: `You have ${nodeEntries.length} lorebook entries in "${node.label}". Split into 2-${subCatCount} sub-categories. Every entry must be assigned.${existingHint}\n\nEntries:\n${entryList}\n\nRespond ONLY with JSON: { "subcategories": [{ "label": "Name", "entries": [uid1, uid2] }] }`,
-                    systemPrompt: 'You are a categorization assistant. Respond ONLY with valid JSON, no commentary.',
+                    systemPrompt: applyBackgroundPromptAddendum('You are a categorization assistant. Respond ONLY with valid JSON, no commentary.'),
                 });
                 if (response) {
                     const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -960,7 +961,7 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
         try {
             response = await generateRaw({
                 prompt: buildIngestPrompt(lorebookName, formatted),
-                systemPrompt: 'You are a fact extraction assistant. Extract important facts, character details, relationships, events, and world information from roleplay chat logs. Respond ONLY with valid JSON, no commentary.',
+                systemPrompt: applyBackgroundPromptAddendum('You are a fact extraction assistant. Extract important facts, character details, relationships, events, and world information from roleplay chat logs. Respond ONLY with valid JSON, no commentary.'),
             });
         } catch (e) {
             console.error(`[TunnelVision] Ingest chunk ${i + 1} LLM call failed:`, e);
@@ -970,20 +971,18 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
 
         if (!response) continue;
 
-        // Parse JSON response
+        // Parse JSON response. If the provider truncated the final object, keep
+        // any complete objects from the same chunk instead of discarding all work.
         let entries;
         try {
-            const jsonMatch = response.match(/\[[\s\S]*\]/);
-            if (!jsonMatch) {
-                const objMatch = response.match(/\{[\s\S]*\}/);
-                if (objMatch) {
-                    const parsed = JSON.parse(objMatch[0]);
-                    entries = parsed.entries || [parsed];
-                } else {
-                    throw new Error('No JSON found in response');
-                }
-            } else {
-                entries = JSON.parse(jsonMatch[0]);
+            const parsed = parseIngestEntries(response);
+            entries = parsed.entries;
+            if (parsed.partial) {
+                totalErrors++;
+                console.warn(`[TunnelVision] Ingest chunk ${i + 1} response was partial; salvaged ${entries.length} complete entr${entries.length === 1 ? 'y' : 'ies'}.`);
+            }
+            if (!entries.length) {
+                throw new Error('No complete JSON entries found in response');
             }
         } catch (e) {
             console.warn(`[TunnelVision] Ingest chunk ${i + 1} JSON parse failed:`, e, response);
@@ -1040,6 +1039,112 @@ Rules:
 - Include character names in keys for cross-referencing
 - Skip trivial or generic information
 - Merge related facts into single entries when they belong together`;
+}
+
+function findBalancedJsonEnd(text, start, opener, closer) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch === '\\') {
+                escaped = true;
+            } else if (ch === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            inString = true;
+        } else if (ch === opener) {
+            depth++;
+        } else if (ch === closer) {
+            depth--;
+            if (depth === 0) return i;
+        }
+    }
+
+    return -1;
+}
+
+function salvageCompleteObjects(text) {
+    const entries = [];
+    let inString = false;
+    let escaped = false;
+    let depth = 0;
+    let objectStart = -1;
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (ch === '\\') {
+                escaped = true;
+            } else if (ch === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            inString = true;
+        } else if (ch === '{') {
+            if (depth === 0) objectStart = i;
+            depth++;
+        } else if (ch === '}') {
+            depth--;
+            if (depth === 0 && objectStart >= 0) {
+                try {
+                    const parsed = JSON.parse(text.substring(objectStart, i + 1));
+                    entries.push(parsed);
+                } catch {
+                    // Ignore malformed object and keep scanning for later complete ones.
+                }
+                objectStart = -1;
+            }
+        }
+    }
+
+    return entries;
+}
+
+function parseIngestEntries(response) {
+    if (!response || typeof response !== 'string') {
+        return { entries: [], partial: false };
+    }
+
+    const cleaned = response.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '').trim();
+
+    const arrayStart = cleaned.indexOf('[');
+    if (arrayStart >= 0) {
+        const arrayEnd = findBalancedJsonEnd(cleaned, arrayStart, '[', ']');
+        if (arrayEnd >= 0) {
+            const parsed = JSON.parse(cleaned.substring(arrayStart, arrayEnd + 1));
+            return { entries: Array.isArray(parsed) ? parsed : [], partial: false };
+        }
+
+        const salvaged = salvageCompleteObjects(cleaned.substring(arrayStart));
+        return { entries: salvaged, partial: salvaged.length > 0 };
+    }
+
+    const objectStart = cleaned.indexOf('{');
+    if (objectStart >= 0) {
+        const objectEnd = findBalancedJsonEnd(cleaned, objectStart, '{', '}');
+        if (objectEnd >= 0) {
+            const parsed = JSON.parse(cleaned.substring(objectStart, objectEnd + 1));
+            return { entries: Array.isArray(parsed?.entries) ? parsed.entries : [parsed], partial: false };
+        }
+    }
+
+    return { entries: [], partial: false };
 }
 
 /**

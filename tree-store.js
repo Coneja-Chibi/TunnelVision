@@ -307,6 +307,7 @@ export const SETTING_DEFAULTS = {
     passthroughConstant: true,
     allowKeywordTriggers: false,
     autoDetectPattern: '',
+    backgroundPromptAddendum: '',
     confirmTools: {},
     toolPromptOverrides: {},
     // Sidecar auto-retrieval (pre-gen)

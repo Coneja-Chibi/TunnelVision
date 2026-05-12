@@ -119,6 +119,12 @@ export function bindUIEvents() {
         saveSettingsDebounced();
     });
 
+    $('#tv_background_prompt_addendum').on('input', function () {
+        const settings = getSettings();
+        settings.backgroundPromptAddendum = $(this).val();
+        saveSettingsDebounced();
+    });
+
     // Per-tool toggles
     $(document).on('change', '.tv_tool_enabled', onToolToggle);
 
@@ -267,6 +273,9 @@ export function refreshUI() {
 
     // Sync output language
     $('#tv_target_language').val(settings.targetLanguage || '');
+
+    // Sync background LLM prompt addendum
+    $('#tv_background_prompt_addendum').val(settings.backgroundPromptAddendum || '');
 
     // Sync selective retrieval
     $('#tv_selective_retrieval').prop('checked', settings.selectiveRetrieval === true);

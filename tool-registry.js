@@ -11,7 +11,8 @@ import { characters, this_chid, chat_metadata } from '../../../../script.js';
 import { selected_group, groups } from '../../../group-chats.js';
 import { getCharaFilename } from '../../../utils.js';
 import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
-import { isLorebookEnabled, getSettings, getTree, getBookDescription, syncTrackerUidsForLorebook, canReadBook, canWriteBook, isNativeInjectionBook } from './tree-store.js';
+import { power_user } from '../../../power-user.js';
+import { isLorebookEnabled, getSettings, getTree, getBookDescription, syncTrackerUidsForLorebook, getBookPermission, canReadBook, canWriteBook, isNativeInjectionBook } from './tree-store.js';
 import { logToolCallStarted } from './activity-feed.js';
 import { findEntry } from './entry-manager.js';
 
@@ -132,7 +133,8 @@ async function getTrackerList() {
 
 /**
  * Get all active lorebooks that have TunnelVision enabled.
- * Checks global, character-attached (primary + extraBooks), and chat-attached lorebooks.
+ * Checks global, character-attached (primary + extraBooks), chat-attached,
+ * and persona-attached lorebooks.
  * Shared by all tools via import from this module.
  * @returns {string[]}
  */
@@ -168,6 +170,10 @@ export function getActiveTunnelVisionBooks() {
     if (Array.isArray(chat_metadata?.carrot_chat_books)) {
         for (const name of chat_metadata.carrot_chat_books) candidates.add(name);
     }
+
+    // 4. Persona-attached lorebook
+    const personaWorld = power_user?.persona_description_lorebook;
+    if (personaWorld) candidates.add(personaWorld);
 
     // Filter to only TV-enabled books
     const active = [];
@@ -321,11 +327,11 @@ export function resolveTargetBook(requestedBook, { checkWrite = false } = {}) {
 
     // Multiple candidates: validate the AI's choice
     if (!requestedBook) {
-        const desc = getBookListWithDescriptions();
+        const desc = getBookListWithDescriptions({ writableOnly: checkWrite });
         return { book: '', error: `Multiple lorebooks active. You must specify which one.\n${desc}` };
     }
     if (!activeBooks.includes(requestedBook)) {
-        const desc = getBookListWithDescriptions();
+        const desc = getBookListWithDescriptions({ writableOnly: checkWrite });
         return { book: '', error: `Lorebook "${requestedBook}" is not active.\n${desc}` };
     }
     if (checkWrite && !canWriteBook(requestedBook)) {
@@ -344,6 +350,15 @@ export function getReadableBooks() {
 }
 
 /**
+ * Get active lorebooks that allow write operations.
+ * Filters out read-only lorebooks.
+ * @returns {string[]}
+ */
+export function getWritableBooks() {
+    return getActiveTunnelVisionBooks().filter(canWriteBook);
+}
+
+/**
  * Get active lorebooks that TV manages injection for (excludes native-injection books).
  * Use this for smart-context and sidecar retrieval — these should NOT inject content
  * from books where ST handles injection natively (outlets, positions, etc.).
@@ -358,22 +373,31 @@ export function getInjectionManagedBooks() {
  * Uses user-set description, falls back to tree root summary, falls back to top-level labels.
  * @returns {string} Formatted multi-line description of available lorebooks.
  */
-export function getBookListWithDescriptions() {
+export function getBookListWithDescriptions({ readableOnly = false, writableOnly = false } = {}) {
     const activeBooks = getActiveTunnelVisionBooks();
     if (activeBooks.length === 0) return '(none active)';
 
     const lines = [];
     for (const bookName of activeBooks) {
+        if (readableOnly && !canReadBook(bookName)) continue;
+        if (writableOnly && !canWriteBook(bookName)) continue;
+
+        const permission = getBookPermission(bookName);
+        const permissionLabel = permission === 'read_only'
+            ? ' [read-only]'
+            : permission === 'write_only'
+                ? ' [write-only]'
+                : '';
         const userDesc = getBookDescription(bookName);
         if (userDesc) {
-            lines.push(`- "${bookName}": ${userDesc}`);
+            lines.push(`- "${bookName}"${permissionLabel}: ${userDesc}`);
             continue;
         }
 
         // Fall back to tree root summary
         const tree = getTree(bookName);
         if (tree?.root?.summary && tree.root.summary !== `Top-level index for ${bookName}`) {
-            lines.push(`- "${bookName}": ${tree.root.summary}`);
+            lines.push(`- "${bookName}"${permissionLabel}: ${tree.root.summary}`);
             continue;
         }
 
@@ -381,14 +405,14 @@ export function getBookListWithDescriptions() {
         if (tree?.root?.children?.length > 0) {
             const labels = tree.root.children.map(c => c.label).slice(0, 6).join(', ');
             const more = tree.root.children.length > 6 ? ` (+${tree.root.children.length - 6} more)` : '';
-            lines.push(`- "${bookName}": Contains: ${labels}${more}`);
+            lines.push(`- "${bookName}"${permissionLabel}: Contains: ${labels}${more}`);
             continue;
         }
 
-        lines.push(`- "${bookName}"`);
+        lines.push(`- "${bookName}"${permissionLabel}`);
     }
 
-    return lines.join('\n');
+    return lines.length > 0 ? lines.join('\n') : '(none available)';
 }
 
 /**

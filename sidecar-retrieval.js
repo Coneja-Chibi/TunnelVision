@@ -27,7 +27,7 @@ import { getReadableBooks } from './tool-registry.js';
 import { hasEvaluableConditions, separateConditions, mapSelectiveLogic, describeSelectiveLogic, CONDITION_DESCRIPTIONS, CONDITION_LABELS, rollKeywordProbability, formatCondition } from './conditions.js';
 import { isSidecarConfigured, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { logSidecarRetrieval, logConditionalEvaluations, setSidecarActive } from './activity-feed.js';
-import { buildLanguageDirective } from './agent-utils.js';
+import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
 
 const TV_SIDECAR_RETRIEVAL_KEY = 'tunnelvision_sidecar_retrieval';
 
@@ -462,7 +462,7 @@ export async function runSidecarRetrieval() {
         const langDirective = buildLanguageDirective();
         const response = await sidecarGenerate({
             prompt,
-            systemPrompt: SIDECAR_SYSTEM_PROMPT + langDirective,
+            systemPrompt: applyBackgroundPromptAddendum(SIDECAR_SYSTEM_PROMPT) + langDirective,
         });
 
         const { nodeIds, reasoning, conditionalEvaluations } = parseSidecarResponse(response);
@@ -516,8 +516,7 @@ export async function runSidecarRetrieval() {
             ? injectionText.substring(0, maxChars) + '\n[... content truncated]'
             : injectionText;
 
-        // IN_CHAT depth 0 = injected at the very bottom of the chat history (closest to the latest message)
-        setExtensionPrompt(TV_SIDECAR_RETRIEVAL_KEY, capped, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        setExtensionPrompt(TV_SIDECAR_RETRIEVAL_KEY, capped, position, depth, false, role);
 
         // Resolve node labels for the feed
         const nodeLabels = nodeIds.map(id => {

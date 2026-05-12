@@ -35,7 +35,7 @@ import { getContext } from "../../../st-context.js";
 import { getSettings, getTrackerUids, getTree } from "./tree-store.js";
 import { getActiveTunnelVisionBooks, getInjectionManagedBooks } from "./tool-registry.js";
 import { getSelectivelyRetrievedUids } from "./tools/search.js";
-import { getCachedWorldInfoSync, getCachedWorldInfo } from "./entry-manager.js";
+import { getCachedWorldInfoSync, getCachedWorldInfo, getEntryTurnIndex } from "./entry-manager.js";
 import { getEntryTitle, getMaxContextTokens } from "./agent-utils.js";
 import { getWorldStateSections } from "./world-state.js";
 import { getActiveArcs } from "./arc-tracker.js";
@@ -228,6 +228,7 @@ export const TIER_COLD = "cold";
  * @param {Record<string, number>} opts.relevanceMap
  * @param {number} opts.chatLength
  * @param {number} opts.maxUid
+ * @param {number} [opts.turnIndex]
  * @param {number} [opts.arcOverlap] - Non-zero if entry overlaps an active arc
  * @returns {'hot'|'warm'|'cold'}
  */
@@ -240,6 +241,7 @@ export function computeEntryTier(
     relevanceMap,
     chatLength,
     maxUid,
+    turnIndex = -1,
     arcOverlap = 0,
   },
 ) {
@@ -258,11 +260,17 @@ export function computeEntryTier(
   if (elapsed < HOT_RECENCY_MS) return TIER_HOT;
   if (arcOverlap > 0 && elapsed < WARM_RECENCY_MS) return TIER_HOT;
 
-  const uidRatio = maxUid > 0 ? entry.uid / maxUid : 1;
-  const warmUidThreshold =
-    chatLength > 0 ? Math.max(1 - 100 / chatLength, 0.5) : 0.8;
+  if (chatLength > 0 && turnIndex >= 0 && chatLength - turnIndex <= 100) {
+    return TIER_WARM;
+  }
 
-  if (uidRatio > warmUidThreshold) return TIER_WARM;
+  if (turnIndex < 0) {
+    const uidRatio = maxUid > 0 ? entry.uid / maxUid : 1;
+    const warmUidThreshold =
+      chatLength > 0 ? Math.max(1 - 100 / chatLength, 0.5) : 0.8;
+
+    if (uidRatio > warmUidThreshold) return TIER_WARM;
+  }
   if (elapsed < WARM_RECENCY_MS) return TIER_WARM;
   if (
     fb &&
@@ -1063,10 +1071,15 @@ function collectMentionedEntryKeys(entry, presentKeySet, currentMentionKeys) {
   }
 }
 
-function applyPrimaryScoringStages(relevance, entry, ctx) {
+function applyPrimaryScoringStages(relevance, entry, ctx, bookName) {
   let score = relevance;
   score += relevanceDecay(entry.uid, ctx.relevanceMap);
-  if (ctx.maxUid > 0 && entry.uid > ctx.maxUid * 0.9) score += 3;
+  const turnIndex = getEntryTurnIndex(bookName, entry.uid);
+  if (turnIndex >= 0 && ctx.chatLength > 0) {
+    if (ctx.chatLength - turnIndex <= 100) score += 3;
+  } else if (ctx.maxUid > 0 && entry.uid > ctx.maxUid * 0.9) {
+    score += 3;
+  }
   score += worldStateBoost(entry, ctx.wsSignals);
   score += feedbackBoost(entry.uid);
   score += cooldownPenalty(entry.uid);
@@ -1230,7 +1243,8 @@ function scoreCandidates(activeBooks, recentText) {
         collectMentionedEntryKeys(entry, presentKeySet, currentMentionKeys);
       }
 
-      relevance = applyPrimaryScoringStages(relevance, entry, ctx);
+      const turnIndex = getEntryTurnIndex(bookName, entry.uid);
+      relevance = applyPrimaryScoringStages(relevance, entry, ctx, bookName);
       const entryArcBoost = arcBoost(entry);
       relevance += entryArcBoost;
 
@@ -1241,6 +1255,7 @@ function scoreCandidates(activeBooks, recentText) {
         relevanceMap: ctx.relevanceMap,
         chatLength: ctx.chatLength,
         maxUid: ctx.maxUid,
+        turnIndex,
         arcOverlap: entryArcBoost,
         threshold,
       });

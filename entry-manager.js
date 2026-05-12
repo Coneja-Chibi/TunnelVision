@@ -573,19 +573,22 @@ const _entryTemporal = new Map(); // key: `${bookName}:${uid}`
  * Record temporal metadata for an entry (creation or update timestamp).
  * @param {string} bookName
  * @param {number} uid
- * @param {{ created?: number, updated?: number, source?: string }} meta
+ * @param {{ created?: number, updated?: number, source?: string, turnIndex?: number }} meta
  */
 export function recordEntryTemporal(bookName, uid, meta) {
     const key = `${bookName}:${uid}`;
     const existing = _entryTemporal.get(key) || {};
     _entryTemporal.set(key, { ...existing, ...meta });
+    if (Number.isFinite(meta?.turnIndex)) {
+        setEntryTurnIndex(bookName, uid, Number(meta.turnIndex));
+    }
 }
 
 /**
  * Get temporal metadata for an entry.
  * @param {string} bookName
  * @param {number} uid
- * @returns {{ created?: number, updated?: number, source?: string }|null}
+ * @returns {{ created?: number, updated?: number, source?: string, turnIndex?: number }|null}
  */
 export function getEntryTemporal(bookName, uid) {
     return _entryTemporal.get(`${bookName}:${uid}`) || null;
