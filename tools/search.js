@@ -33,29 +33,6 @@ const LOOP_THRESHOLD = 3;
 // so smart-context can filter its candidates to match.
 
 const _selectivelyRetrievedUids = new Set();
-const _selectivelyRetrievedEntryKeys = new Set();
-const _selectiveEntryCandidates = new Map(); // uid -> Set("book:uid") shown this turn
-
-function makeEntryKey(bookName, uid) {
-    return `${bookName}:${Number(uid)}`;
-}
-
-function parseEntryRef(ref) {
-    const text = String(ref || '').trim();
-    const match = text.match(/^(.*)::(\d+)$/);
-    if (!match) return null;
-    return { bookName: match[1], uid: Number(match[2]) };
-}
-
-function rememberSelectiveCandidate(bookName, uid) {
-    const numUid = Number(uid);
-    if (!Number.isFinite(numUid)) return;
-    const key = makeEntryKey(bookName, numUid);
-    if (!_selectiveEntryCandidates.has(numUid)) {
-        _selectiveEntryCandidates.set(numUid, new Set());
-    }
-    _selectiveEntryCandidates.get(numUid).add(key);
-}
 
 /**
  * Get the set of UIDs the model explicitly selected this turn.
@@ -65,17 +42,11 @@ export function getSelectivelyRetrievedUids() {
     return _selectivelyRetrievedUids;
 }
 
-export function getSelectivelyRetrievedEntryKeys() {
-    return _selectivelyRetrievedEntryKeys;
-}
-
 /**
  * Clear selective retrieval tracking. Call at GENERATION_STARTED.
  */
 export function resetSelectiveRetrievalTracker() {
     _selectivelyRetrievedUids.clear();
-    _selectivelyRetrievedEntryKeys.clear();
-    _selectiveEntryCandidates.clear();
 }
 
 /**
@@ -484,10 +455,9 @@ async function buildEntryManifest(nodeId) {
             if (!entry?.content || entry.disable) continue;
             count++;
             const title = entry.comment || entry.key?.[0] || `Entry #${uid}`;
-            const keys = [`ref ${bookName}::${uid}`, ...(entry.key || []).slice(0, 5)].join(', ');
+            const keys = (entry.key || []).slice(0, 5).join(', ');
             const preview = (entry.content || '').substring(0, 120).replace(/\n/g, ' ');
             const triggered = getKeywordTriggeredUids().has(Number(uid));
-            rememberSelectiveCandidate(bookName, uid);
             const tag = triggered ? ' ⚡already in context' : '';
             lines.push(`  - [UID ${uid}] "${title}" (${bookName})${tag}${keys ? ` — keys: ${keys}` : ''}\n    ${preview}${entry.content.length > 120 ? '...' : ''}`);
         }
@@ -522,77 +492,31 @@ async function buildEntryManifest(nodeId) {
  * Resolve specific entries by UID across all active lorebooks.
  * Used in selective retrieval mode when the model picks entries from the manifest.
  * @param {number[]} uids
- * @returns {Promise<{ content: string, entryKeys: string[] }>}
+ * @returns {Promise<string>}
  */
-async function resolveEntriesByUid(uids, entryRefs = []) {
+async function resolveEntriesByUid(uids) {
     const results = [];
     const seen = new Set();
-    const ambiguity = [];
-    const readableBooks = getReadableBooks();
-    const exactRefs = Array.isArray(entryRefs)
-        ? entryRefs.map(parseEntryRef).filter(Boolean)
-        : [];
-    const exactRefUids = new Set(exactRefs.map((ref) => ref.uid));
 
-    for (const ref of exactRefs) {
-        if (!readableBooks.includes(ref.bookName)) continue;
-        const bookData = await loadWorldInfo(ref.bookName);
+    for (const bookName of getReadableBooks()) {
+        const bookData = await loadWorldInfo(bookName);
         if (!bookData?.entries) continue;
         const uidMap = buildUidMap(bookData.entries);
-        const entry = uidMap.get(ref.uid);
-        if (!entry?.content || entry.disable) continue;
-        const key = makeEntryKey(ref.bookName, ref.uid);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const title = entry.comment || entry.key?.[0] || `Entry #${ref.uid}`;
-        results.push(`[Lorebook: ${ref.bookName} | UID: ${ref.uid} | Title: ${title}]\n${entry.content}`);
-    }
 
-    for (const uid of uids) {
-        const numUid = Number(uid);
-        if (!isFinite(numUid)) continue;
-        if (exactRefUids.has(numUid)) continue;
-        const hintedKeys = _selectiveEntryCandidates.get(numUid);
-        let candidateKeys = hintedKeys ? [...hintedKeys] : [];
-        candidateKeys = candidateKeys.filter((key) => {
-            const splitAt = key.lastIndexOf(':');
-            return splitAt > 0 && readableBooks.includes(key.slice(0, splitAt));
-        });
-
-        if (candidateKeys.length === 0) {
-            for (const bookName of readableBooks) {
-                const bookData = await loadWorldInfo(bookName);
-                if (!bookData?.entries) continue;
-                const uidMap = buildUidMap(bookData.entries);
-                const entry = uidMap.get(numUid);
-                if (entry?.content && !entry.disable) {
-                    candidateKeys.push(makeEntryKey(bookName, numUid));
-                }
-            }
-        }
-
-        if (candidateKeys.length > 1) {
-            ambiguity.push(`UID ${numUid} exists in multiple lorebooks: ${candidateKeys.join(', ')}. Use entry_refs with a value like "${candidateKeys[0].replace(/:(\d+)$/, '::$1')}".`);
-            continue;
-        }
-
-        for (const key of candidateKeys) {
-            const splitAt = key.lastIndexOf(':');
-            const bookName = key.slice(0, splitAt);
-            const keyUid = Number(key.slice(splitAt + 1));
-            const bookData = await loadWorldInfo(bookName);
-            if (!bookData?.entries) continue;
-            const uidMap = buildUidMap(bookData.entries);
-            const entry = uidMap.get(keyUid);
+        for (const uid of uids) {
+            const numUid = Number(uid);
+            if (!isFinite(numUid)) continue;
+            const entry = uidMap.get(numUid);
             if (!entry?.content || entry.disable) continue;
+            const key = `${bookName}:${numUid}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            const title = entry.comment || entry.key?.[0] || `Entry #${keyUid}`;
-            results.push(`[Lorebook: ${bookName} | UID: ${keyUid} | Title: ${title}]\n${entry.content}`);
+            const title = entry.comment || entry.key?.[0] || `Entry #${numUid}`;
+            results.push(`[Lorebook: ${bookName} | UID: ${numUid} | Title: ${title}]\n${entry.content}`);
         }
     }
 
-    return { content: results.join('\n\n'), entryKeys: [...seen], ambiguity };
+    return results.join('\n\n');
 }
 
 /**
@@ -750,11 +674,6 @@ CROSS-BOOK SEARCH: Use action "search" with a "query" to find entries by keyword
                 items: { type: 'number' },
                 description: 'Specific entry UIDs to retrieve full content for. Use after seeing the entry manifest from a retrieve call.',
             },
-            entry_refs: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Precise entry references in the form "Lorebook Name::UID". Use when the same UID exists in multiple lorebooks.',
-            },
         }
         : {};
 
@@ -765,7 +684,7 @@ CROSS-BOOK SEARCH: Use action "search" with a "query" to find entries by keyword
     const parameters = isCollapsed
         ? {
             type: 'object',
-            required: selective ? [] : ['node_ids'],
+            required: ['node_ids'],
             properties: {
                 node_ids: {
                     type: 'array',
@@ -790,7 +709,7 @@ CROSS-BOOK SEARCH: Use action "search" with a "query" to find entries by keyword
         }
         : {
             type: 'object',
-            required: selective ? [] : ['node_id'],
+            required: ['node_id'],
             properties: {
                 node_id: {
                     type: 'string',
@@ -830,8 +749,8 @@ CROSS-BOOK SEARCH: Use action "search" with a "query" to find entries by keyword
             }
 
             // Selective retrieval: resolve specific entries by UID
-            if (selective && ((Array.isArray(args.entry_uids) && args.entry_uids.length > 0) || (Array.isArray(args.entry_refs) && args.entry_refs.length > 0))) {
-                return handleSelectiveEntryRetrieval(args.entry_uids || [], args.entry_refs || []);
+            if (selective && Array.isArray(args.entry_uids) && args.entry_uids.length > 0) {
+                return handleSelectiveEntryRetrieval(args.entry_uids);
             }
 
             // Cross-book keyword search
@@ -866,11 +785,8 @@ CROSS-BOOK SEARCH: Use action "search" with a "query" to find entries by keyword
  * @param {number[]} entryUids
  * @returns {Promise<string>}
  */
-async function handleSelectiveEntryRetrieval(entryUids, entryRefs = []) {
-    const { content, entryKeys, ambiguity } = await resolveEntriesByUid(entryUids, entryRefs);
-    if (ambiguity?.length) {
-        return ambiguity.join('\n');
-    }
+async function handleSelectiveEntryRetrieval(entryUids) {
+    const content = await resolveEntriesByUid(entryUids);
     if (!content) {
         return `No entries found for UIDs: ${entryUids.join(', ')}. Double-check the UIDs from the manifest — they must be numeric entry UIDs, not node IDs.`;
     }
@@ -878,9 +794,6 @@ async function handleSelectiveEntryRetrieval(entryUids, entryRefs = []) {
     // can filter its candidates to only these entries
     for (const uid of entryUids) {
         _selectivelyRetrievedUids.add(Number(uid));
-    }
-    for (const key of entryKeys) {
-        _selectivelyRetrievedEntryKeys.add(key);
     }
     console.log(`[TunnelVision] Selective retrieval: ${entryUids.length} UID(s) requested`);
     return content;
@@ -1099,7 +1012,6 @@ async function handleCrossBookSearch(args, selective = false) {
                 keys: (entry.key || []).slice(0, 5).join(', '),
                 preview: (entry.content || '').substring(0, SEARCH_PREVIEW_LEN),
             });
-            rememberSelectiveCandidate(bookName, entry.uid);
 
             if (results.length >= SEARCH_MAX_RESULTS) break;
         }

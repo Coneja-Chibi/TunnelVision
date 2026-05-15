@@ -145,44 +145,6 @@ export async function hideSummarizedMessages(messagesBack, overrideStart, overri
     }
 }
 
-export function getVisibleMessageIdsInRange(start, end) {
-    const from = Math.max(1, Number(start));
-    const to = Number(end);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return [];
-    const chat = getContext()?.chat || [];
-    const ids = [];
-    for (let i = from; i <= to; i++) {
-        if (chat[i] && !chat[i].is_system) ids.push(i);
-    }
-    return ids;
-}
-
-export async function unhideSummarizedMessages(start, end, previousWatermark = -1, messageIds = null) {
-    const from = Math.max(1, Number(start));
-    const to = Number(end);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return null;
-
-    try {
-        const ids = Array.isArray(messageIds)
-            ? messageIds.map(Number).filter((id) => Number.isInteger(id) && id >= from && id <= to)
-            : [];
-        if (ids.length > 0) {
-            for (const id of ids) {
-                await hideChatMessageRange(id, id, true);
-            }
-        } else {
-            await hideChatMessageRange(from, to, true);
-        }
-        setWatermark(Number.isFinite(previousWatermark) ? previousWatermark : -1);
-        const label = ids.length > 0 ? ids.join(',') : `${from}-${to}`;
-        console.log(`[TunnelVision] Unhid summarized messages ${label} after rollback`);
-        return `Unhid summarized messages (${label}).`;
-    } catch (e) {
-        console.error('[TunnelVision] Failed to unhide summarized messages:', e);
-        return null;
-    }
-}
-
 export async function flushPendingSummaryHide() {
     const context = getContext();
     const pending = context.chatMetadata?.[PENDING_HIDE_KEY];

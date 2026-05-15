@@ -29,7 +29,6 @@ import {
 } from "./tree-store.js";
 import {
   getActiveTunnelVisionBooks,
-  getWritableBooks,
   resolveTargetBook,
 } from "./tool-registry.js";
 import {
@@ -48,8 +47,6 @@ import {
   getWatermark,
   setWatermark,
   hideSummarizedMessages,
-  getVisibleMessageIdsInRange,
-  unhideSummarizedMessages,
 } from "./tools/summarize.js";
 import {
   getChatId,
@@ -137,9 +134,6 @@ function getProcessingGateState() {
   const activeBooks = getActiveTunnelVisionBooks();
   if (activeBooks.length === 0) {
     return { allowed: false, reason: "no-active-books" };
-  }
-  if (getWritableBooks().length === 0) {
-    return { allowed: false, reason: "no-writable-books" };
   }
 
   const context = getContext();
@@ -239,17 +233,13 @@ export async function runPostTurnProcessor(force = false) {
 
   const activeBooks = getActiveTunnelVisionBooks();
   if (activeBooks.length === 0) return null;
-  const writableBooks = getWritableBooks();
-  if (writableBooks.length === 0) return null;
 
   const context = getContext();
   const chat = context.chat;
   if (!chat || chat.length === 0) return null;
 
   const chatId = getChatId();
-  const { book: targetBook, error } = resolveTargetBook(writableBooks[0], {
-    checkWrite: true,
-  });
+  const { book: targetBook, error } = resolveTargetBook(activeBooks[0]);
   if (error || !targetBook) return null;
 
   _processorRunning = true;
@@ -295,23 +285,26 @@ export async function runPostTurnProcessor(force = false) {
     if (getChatId() !== chatId || task.cancelled) return null;
 
     // ── Steps 1 + 3 in parallel: Fact Extraction and Tracker Updates ──
-    // These both save lorebooks, so keep the writes serialized.
-    // Scene archiving (Step 2) still waits for fact extraction since it needs scene detection.
-    const analysisResult =
+    // These are independent LLM calls that don't depend on each other.
+    // Scene archiving (Step 2) waits for fact extraction since it needs scene detection.
+    const analysisPromise =
       settings.postTurnExtractFacts !== false
-        ? await analyzeExchange(targetBook, recentExcerpt, chatId)
-        : null;
+        ? analyzeExchange(targetBook, recentExcerpt, chatId)
+        : Promise.resolve(null);
 
-    if (getChatId() !== chatId || task.cancelled) return null;
-
-    const trackers =
+    const trackerPromise =
       settings.postTurnUpdateTrackers !== false
-        ? await loadTrackerEntries(writableBooks)
-        : [];
-    const trackerResult =
-      trackers.length > 0
-        ? await updateTrackers(trackers, recentExcerpt, chatId)
-        : null;
+        ? loadTrackerEntries(activeBooks).then((trackers) =>
+            trackers.length > 0
+              ? updateTrackers(trackers, recentExcerpt, chatId)
+              : null,
+          )
+        : Promise.resolve(null);
+
+    const [analysisResult, trackerResult] = await Promise.all([
+      analysisPromise,
+      trackerPromise,
+    ]);
 
     if (analysisResult) {
       result.factsCreated = analysisResult.factsCreated;
@@ -882,26 +875,11 @@ async function archiveScene(targetBook, chat, sceneChange, chatId) {
     if (summaryResult?.title) {
       result.archived = true;
       result.title = summaryResult.title;
-      if (summaryResult.uid) {
-        _liveRollback?.createdUids.push(summaryResult.uid);
-        persistLiveRollback();
-      }
 
       // Hide old-scene messages and advance watermark with the correct
       // range (watermark+1 → sceneEndIdx), not the full-chat tail.
       try {
-        const previousWatermark = getWatermark();
-        const hideStart = Math.max(1, previousWatermark < 0 ? 1 : previousWatermark + 1);
-        if (_liveRollback) {
-          _liveRollback.previousWatermark = previousWatermark;
-          persistLiveRollback();
-        }
-        const hiddenMessageIds = getVisibleMessageIdsInRange(hideStart, sceneEndIdx);
-        const hideResult = await hideSummarizedMessages(undefined, hideStart, sceneEndIdx);
-        if (hideResult && _liveRollback) {
-          _liveRollback.hiddenRange = { start: hideStart, end: sceneEndIdx, previousWatermark, messageIds: hiddenMessageIds };
-          persistLiveRollback();
-        }
+        await hideSummarizedMessages(undefined, { endIndex: sceneEndIdx });
       } catch (e) {
         console.warn("[TunnelVision] Scene archive hide failed:", e);
       }
@@ -1064,23 +1042,13 @@ export async function updateTrackers(trackers, recentExcerpt, chatId) {
     const updates = parseJsonFromLLM(response, { type: "array" });
     if (!Array.isArray(updates) || updates.length === 0) return result;
 
-    const trackerMap = new Map(trackers.map((t) => [`${t.book}:${t.uid}`, t]));
-    const trackerUidMap = new Map();
-    for (const tracker of trackers) {
-      const list = trackerUidMap.get(tracker.uid) || [];
-      list.push(tracker);
-      trackerUidMap.set(tracker.uid, list);
-    }
+    const trackerMap = new Map(trackers.map((t) => [t.uid, t]));
     const hashes = getTrackerHashes();
 
     for (const update of updates) {
       if (!update?.uid || !update?.content) continue;
 
-      const updateUid = Number(update.uid);
-      const requestedBook = update.book ? String(update.book) : "";
-      const tracker = requestedBook
-        ? trackerMap.get(`${requestedBook}:${updateUid}`)
-        : ((trackerUidMap.get(updateUid) || []).length === 1 ? trackerUidMap.get(updateUid)[0] : null);
+      const tracker = trackerMap.get(Number(update.uid));
       if (!tracker) continue;
 
       const newContent = String(update.content).trim();
@@ -1394,12 +1362,8 @@ function formatCharCard(char) {
 export async function createTrackerForCharacter(characterName) {
   const activeBooks = getActiveTunnelVisionBooks();
   if (activeBooks.length === 0) throw new Error("No active lorebooks");
-  const writableBooks = getWritableBooks();
-  if (writableBooks.length === 0) throw new Error("No writable lorebooks");
 
-  const { book: targetBook, error } = resolveTargetBook(writableBooks[0], {
-    checkWrite: true,
-  });
+  const { book: targetBook, error } = resolveTargetBook(activeBooks[0]);
   if (error || !targetBook)
     throw new Error(error || "Could not resolve target lorebook");
 
@@ -1580,21 +1544,6 @@ async function rollbackLastPostTurn() {
         );
       }
     }
-  }
-
-  if (rb.hiddenRange) {
-    try {
-      await unhideSummarizedMessages(
-        rb.hiddenRange.start,
-        rb.hiddenRange.end,
-        rb.hiddenRange.previousWatermark,
-        rb.hiddenRange.messageIds,
-      );
-    } catch (e) {
-      console.warn("[TunnelVision] Rollback: failed to unhide summarized messages:", e);
-    }
-  } else if (Number.isFinite(rb.previousWatermark)) {
-    setWatermark(rb.previousWatermark);
   }
 
   _liveRollback = null;

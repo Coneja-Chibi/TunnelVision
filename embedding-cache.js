@@ -264,7 +264,7 @@ export async function getEmbeddingSimilarityBoosts(candidates, recentText) {
     for (const tier of EMBEDDING_SIMILARITY_BOOSTS) {
       if (similarity >= tier.minSimilarity) { boost = tier.boost; break; }
     }
-    if (boost > 0) boosts.set(c.entryKey || `${c.bookName}:${c.entry.uid}`, boost);
+    if (boost > 0) boosts.set(c.entry.uid, boost);
   }
 
   return boosts;

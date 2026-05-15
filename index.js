@@ -32,12 +32,8 @@ import { initActivityFeed } from './activity-feed.js';
 import { initCommands } from './commands.js';
 import { initAutoSummary } from './auto-summary.js';
 import { initPostTurnProcessor } from './post-turn-processor.js';
-import { initMemoryLifecycle } from './memory-lifecycle.js';
-import { buildSmartContextPrompt, initSmartContext, initHierarchyRefs } from './smart-context.js';
-import { buildWorldStatePrompt, initWorldState } from './world-state.js';
-import { clearSidecarRetrievalPrompt, runSidecarRetrieval } from './sidecar-retrieval.js';
+import { runSidecarRetrieval } from './sidecar-retrieval.js';
 import { runSidecarWriter } from './sidecar-writer.js';
-import { setInjectionSizes } from './agent-utils.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
 
@@ -53,6 +49,7 @@ let _generationInProgress = false;
 // so we mirror it here to know when we're on the final pass.
 let _toolRecursionDepth = 0;
 let _skipPreCommandGeneration = false;
+let _stateRefreshTimer = null;
 
 async function init() {
     // Ensure settings exist
@@ -83,21 +80,11 @@ async function init() {
     // Wire up post-turn processor (tracker updates, fact extraction, scene archiving)
     initPostTurnProcessor();
 
-    // Wire up rolling world state, smart-context prewarm, and lifecycle maintenance
-    initWorldState();
-    initSmartContext();
-    initMemoryLifecycle();
-    try {
-        const { getRolledUpSceneUids } = await import('./summary-hierarchy.js');
-        initHierarchyRefs({ getRolledUpSceneUids });
-    } catch (e) {
-        console.warn('[TunnelVision] Summary hierarchy init failed:', e);
-    }
-
     // Inject condition editor into ST's base lorebook editor
     initWIConditionInjector();
 
     // Load initial state
+    autoDetectLorebooks();
     refreshUI();
 
     // Apply recurse limit override and register tools
@@ -114,6 +101,18 @@ async function init() {
         eventSource.on(event_types.WORLDINFO_SETTINGS_UPDATED, onWorldInfoUpdated);
     }
     eventSource.on(event_types.APP_READY, onAppReady);
+
+    const refreshEvents = [
+        event_types.EXTENSION_SETTINGS_LOADED,
+        event_types.SETTINGS_LOADED,
+        event_types.CONNECTION_PROFILE_LOADED,
+        event_types.CONNECTION_PROFILE_CREATED,
+        event_types.CONNECTION_PROFILE_DELETED,
+        event_types.CONNECTION_PROFILE_UPDATED,
+    ].filter(Boolean);
+    for (const eventName of refreshEvents) {
+        eventSource.on(eventName, () => queueStateRefresh(eventName, 50));
+    }
 
     // Suppress normal WI keyword scanning for TV-managed lorebooks
     if (event_types.WORLDINFO_ENTRIES_LOADED) {
@@ -188,9 +187,7 @@ async function init() {
 }
 
 async function onChatChanged() {
-    autoDetectLorebooks();
-    refreshUI();
-    await registerTools();
+    await refreshRuntimeState('chat changed');
 }
 
 /**
@@ -243,6 +240,7 @@ function autoDetectLorebooks() {
 
 async function onWorldInfoUpdated() {
     console.debug(`[TunnelVision] WORLDINFO_UPDATED fired (generationInProgress=${_generationInProgress})`);
+    autoDetectLorebooks();
     refreshUI();
     if (_generationInProgress) {
         console.debug('[TunnelVision] Skipping tool re-registration during active generation');
@@ -252,6 +250,22 @@ async function onWorldInfoUpdated() {
 }
 
 async function onAppReady() {
+    queueStateRefresh('app ready', 250);
+}
+
+function queueStateRefresh(reason = 'state changed', delay = 0) {
+    if (_stateRefreshTimer) clearTimeout(_stateRefreshTimer);
+    _stateRefreshTimer = setTimeout(() => {
+        _stateRefreshTimer = null;
+        void refreshRuntimeState(reason);
+    }, delay);
+}
+
+async function refreshRuntimeState(reason = 'state changed') {
+    console.debug(`[TunnelVision] Refreshing runtime state (${reason})`);
+    autoDetectLorebooks();
+    refreshUI();
+    if (_generationInProgress) return;
     await registerTools();
 }
 
@@ -649,8 +663,6 @@ function onWorldInfoActivatedForTracking(entryList) {
 
 const TV_PROMPT_KEY = 'tunnelvision_mandatory';
 const TV_NOTEBOOK_KEY = 'tunnelvision_notebook';
-const TV_WORLDSTATE_KEY = 'tunnelvision_worldstate';
-const TV_SMARTCTX_KEY = 'tunnelvision_smartcontext';
 
 /**
  * Map a position setting string to the ST extension_prompt_types enum.
@@ -838,42 +850,6 @@ function convertToolChoiceToAnthropicFormat(toolChoice) {
 function onChatCompletionSettingsReady(data) {
     if (!_generationInProgress) return;
 
-    // ── Anthropic format conversion ──────────────────────────────────
-    // ST's ToolManager registers tools in OpenAI function-calling format
-    // ({ type: "function", function: { ... } }). When the active backend
-    // is Anthropic, convert them to the Messages API format so the request
-    // doesn't get rejected with an "invalid input tag" error.
-    //
-    // IMPORTANT: Skip when chat_completion_source === 'claude' (native ST Claude backend).
-    // That backend (sendClaudeRequest) does its own OpenAI→Anthropic conversion for both
-    // tools and tool_choice. Converting here first causes double-wrapping:
-    //   'auto' → { type: 'auto' } [TunnelVision] → { type: { type: 'auto' } } [backend] ← bug
-    // It also causes tools to be filtered out by the backend's .filter(t => t.type === 'function').
-    // Only convert when going through a proxy/custom endpoint that does NOT handle the conversion.
-    if (data.tools?.length && isAnthropicApi(data)) {
-        let isNativeClaudeBackend = false;
-        try {
-            const ctx = getContext();
-            isNativeClaudeBackend = ctx?.chatCompletionSettings?.chat_completion_source === 'claude';
-        } catch { /* ignore */ }
-
-        if (!isNativeClaudeBackend) {
-            const hasOpenAIWrapped = data.tools.some(t => t?.type === 'function' && t.function);
-            if (hasOpenAIWrapped) {
-                data.tools = data.tools.map(convertToolToAnthropicFormat);
-                if (data.tool_choice !== undefined) {
-                    const converted = convertToolChoiceToAnthropicFormat(data.tool_choice);
-                    if (converted === undefined) {
-                        delete data.tool_choice;
-                    } else {
-                        data.tool_choice = converted;
-                    }
-                }
-                console.log(`[TunnelVision] Converted ${data.tools.length} tool(s) from OpenAI to Anthropic format`);
-            }
-        }
-    }
-
     // ── Final-pass tool stripping ────────────────────────────────────
     const recurseLimit = ToolManager.RECURSE_LIMIT ?? 5;
     if (_toolRecursionDepth >= recurseLimit - 1) {
@@ -919,19 +895,11 @@ async function onGenerationStarted(type, opts, dryRun) {
         _toolRecursionDepth = 0;
         window.TunnelVision_isRecursiveToolPass = false;
         setExtensionPrompt(TV_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        setExtensionPrompt(TV_WORLDSTATE_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        setExtensionPrompt(TV_SMARTCTX_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        setInjectionSizes({ mandatory: 0, worldState: 0, smartContext: 0, notebook: 0 });
         console.debug('[TunnelVision] Pending slash command detected — skipping pre-command TV sidecar/tool work');
         return;
     }
 
     _skipPreCommandGeneration = false;
-    const wasGenerationInProgress = _generationInProgress;
-    if (!wasGenerationInProgress) {
-        // Clean stale tool result tails before classifying recursive passes.
-        cleanOrphanedToolInvocations();
-    }
     _generationInProgress = true;
 
     // Detect recursive tool-call passes FIRST, before any other work.
@@ -939,7 +907,7 @@ async function onGenerationStarted(type, opts, dryRun) {
     // containing the tool results the model needs. We must NOT touch it.
     const context = getContext();
     const lastMsg = context.chat?.[context.chat.length - 1];
-    const isRecursiveToolPass = wasGenerationInProgress && lastMsg?.extra?.tool_invocations != null;
+    const isRecursiveToolPass = lastMsg?.extra?.tool_invocations != null;
     console.debug(`[TunnelVision] GENERATION_STARTED: isRecursiveToolPass=${isRecursiveToolPass} chatLength=${context.chat?.length} lastMsgType=${lastMsg?.is_system ? 'system' : lastMsg?.is_user ? 'user' : 'assistant'} hasToolInvocations=${!!lastMsg?.extra?.tool_invocations}`);
 
     // Track recursion depth so we can strip tools on the final pass
@@ -961,9 +929,6 @@ async function onGenerationStarted(type, opts, dryRun) {
     // be writing the actual response. Then skip all other heavy work.
     if (isRecursiveToolPass) {
         setExtensionPrompt(TV_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        setExtensionPrompt(TV_WORLDSTATE_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        setExtensionPrompt(TV_SMARTCTX_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        setInjectionSizes({ mandatory: 0, worldState: 0, smartContext: 0, notebook: 0 });
         return;
     }
 
@@ -971,8 +936,13 @@ async function onGenerationStarted(type, opts, dryRun) {
     resetNotebookWriteGuard();
 
     const settings = getSettings();
-    const injectionSizes = { mandatory: 0, worldState: 0, smartContext: 0, notebook: 0 };
     let runtimeState = null;
+
+    // Clean up orphaned tool_invocations at the tail of chat (caused by
+    // regenerate or message deletion leaving tool result messages without
+    // a matching assistant reply). Only on first pass — on recursive passes
+    // the tail message IS the active tool result, not an orphan.
+    cleanOrphanedToolInvocations();
 
     if (settings.globalEnabled !== false) {
         runtimeState = await preflightToolRuntimeState({ repair: true, reason: 'generation', log: true });
@@ -990,8 +960,6 @@ async function onGenerationStarted(type, opts, dryRun) {
         } catch (err) {
             console.error('[TunnelVision] Sidecar auto-retrieval error:', err);
         }
-    } else {
-        clearSidecarRetrievalPrompt(settings);
     }
 
     // Mandatory tool call instruction (only on first pass, not recursive)
@@ -1013,7 +981,6 @@ async function onGenerationStarted(type, opts, dryRun) {
     ) {
         const prompt = settings.mandatoryPromptText || '[IMPORTANT INSTRUCTION: You MUST use at least one TunnelVision tool call this turn.]';
         setExtensionPrompt(TV_PROMPT_KEY, prompt, mandatoryPosition, mandatoryDepth, false, mandatoryRole);
-        injectionSizes.mandatory = prompt.length;
     } else {
         setExtensionPrompt(TV_PROMPT_KEY, '', mandatoryPosition, mandatoryDepth, false, mandatoryRole);
         if (
@@ -1034,8 +1001,6 @@ async function onGenerationStarted(type, opts, dryRun) {
         }
     }
 
-    Object.assign(injectionSizes, setWorldStateAndSmartContextPrompts(settings));
-
     // Inject notebook contents every turn (if enabled and notes exist)
     const notebookPosition = mapPositionSetting(settings.notebookPromptPosition);
     const notebookDepth = settings.notebookPromptDepth ?? 1;
@@ -1046,11 +1011,9 @@ async function onGenerationStarted(type, opts, dryRun) {
     if (settings.globalEnabled !== false && settings.notebookEnabled !== false) {
         const notebookPrompt = buildNotebookPrompt();
         setExtensionPrompt(TV_NOTEBOOK_KEY, notebookPrompt, notebookPosition, notebookDepth, false, notebookRole);
-        injectionSizes.notebook = notebookPrompt.length;
     } else {
         setExtensionPrompt(TV_NOTEBOOK_KEY, '', notebookPosition, notebookDepth, false, notebookRole);
     }
-    setInjectionSizes(injectionSizes);
 }
 
 /**
@@ -1063,17 +1026,6 @@ let _sidecarWriterDebounceTimer = null;
 
 async function onMessageReceived(_messageId, type) {
     console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${_messageId} type="${type}"`);
-    const context = getContext();
-    const messageIndex = Number(_messageId);
-    const scheduledChatId = context.chatId || null;
-    const receivedMsg = Number.isInteger(messageIndex)
-        ? context.chat?.[messageIndex]
-        : context.chat?.[context.chat.length - 1];
-    if (Array.isArray(receivedMsg?.extra?.tool_invocations) && receivedMsg.extra.tool_invocations.length > 0) {
-        console.debug('[TunnelVision] MESSAGE_RECEIVED contains tool invocations; waiting for recursive final response');
-        return;
-    }
-
     // Clear generation guards BEFORE the sidecar writer runs, so that lorebook
     // writes triggered by the writer do not get blocked by the generation guard.
     _generationInProgress = false;
@@ -1097,12 +1049,13 @@ async function onMessageReceived(_messageId, type) {
     // In group chats, debounce: wait 800ms after the last MESSAGE_RECEIVED
     // before firing the sidecar writer, so we only run once after the
     // final group member's message instead of N times.
+    const context = getContext();
     if (context.groupId) {
         if (_sidecarWriterDebounceTimer) clearTimeout(_sidecarWriterDebounceTimer);
         _sidecarWriterDebounceTimer = setTimeout(async () => {
             _sidecarWriterDebounceTimer = null;
             try {
-                await runSidecarWriter({ expectedChatId: scheduledChatId, expectedMessageId: messageIndex });
+                await runSidecarWriter();
             } catch (err) {
                 console.error('[TunnelVision] Sidecar post-gen writer error (group):', err);
             }
@@ -1110,52 +1063,11 @@ async function onMessageReceived(_messageId, type) {
         return;
     }
 
-    setTimeout(async () => {
-        try {
-            await runSidecarWriter({ expectedChatId: scheduledChatId, expectedMessageId: messageIndex });
-        } catch (err) {
-            console.error('[TunnelVision] Sidecar post-gen writer error:', err);
-        }
-    }, 0);
-}
-
-function setWorldStateAndSmartContextPrompts(settings) {
-    const worldStatePosition = mapPositionSetting(settings.worldStatePosition);
-    const worldStateDepth = settings.worldStateDepth ?? 2;
-    const worldStateRoleSetting = (settings.worldStatePosition === 'in_chat' && settings.worldStateRole === 'user')
-        ? 'system' : settings.worldStateRole;
-    const worldStateRole = mapRoleSetting(worldStateRoleSetting);
-    const smartContextPosition = mapPositionSetting(settings.smartContextPosition);
-    const smartContextDepth = settings.smartContextDepth ?? 3;
-    const smartContextRoleSetting = (settings.smartContextPosition === 'in_chat' && settings.smartContextRole === 'user')
-        ? 'system' : settings.smartContextRole;
-    const smartContextRole = mapRoleSetting(smartContextRoleSetting);
-
-    let worldStatePrompt = '';
-    let smartContextPrompt = '';
-
-    if (settings.globalEnabled !== false && settings.worldStateEnabled) {
-        try {
-            worldStatePrompt = buildWorldStatePrompt();
-        } catch (err) {
-            console.error('[TunnelVision] World state prompt build failed:', err);
-        }
+    try {
+        await runSidecarWriter();
+    } catch (err) {
+        console.error('[TunnelVision] Sidecar post-gen writer error:', err);
     }
-    if (settings.globalEnabled !== false && settings.smartContextEnabled) {
-        try {
-            smartContextPrompt = buildSmartContextPrompt();
-        } catch (err) {
-            console.error('[TunnelVision] Smart context prompt build failed:', err);
-        }
-    }
-
-    setExtensionPrompt(TV_WORLDSTATE_KEY, worldStatePrompt, worldStatePosition, worldStateDepth, false, worldStateRole);
-    setExtensionPrompt(TV_SMARTCTX_KEY, smartContextPrompt, smartContextPosition, smartContextDepth, false, smartContextRole);
-
-    return {
-        worldState: worldStatePrompt.length,
-        smartContext: smartContextPrompt.length,
-    };
 }
 
 /**

@@ -12,7 +12,6 @@
 import { generateRaw as _generateRaw } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 import { loadWorldInfo } from '../../../world-info.js';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { isSidecarConfigured, sidecarGenerate } from './llm-sidecar.js';
 import { createEntry, findEntryByUid } from './entry-manager.js';
 import {
@@ -22,6 +21,7 @@ import {
     saveTree,
     getAllEntryUids,
     getSettings,
+    findConnectionProfile,
 } from './tree-store.js';
 import { applyBackgroundPromptAddendum } from './agent-utils.js';
 
@@ -103,12 +103,13 @@ async function withConnectionProfile(fn) {
     if (isSidecarConfigured()) return fn();
 
     const settings = getSettings();
-    const targetProfile = settings.connectionProfile;
-    if (!targetProfile) {
+    const targetProfile = findConnectionProfile(settings.connectionProfile);
+    const targetProfileName = targetProfile?.name || settings.connectionProfile;
+    if (!targetProfileName) {
         return fn();
     }
 
-    const profileCmd = SlashCommandParser?.commands?.['profile'];
+    const profileCmd = getContext()?.SlashCommandParser?.commands?.['profile'];
     if (!profileCmd) {
         console.warn('[TunnelVision] /profile command not available (Connection Manager not loaded). Using current API.');
         return fn();
@@ -118,13 +119,13 @@ async function withConnectionProfile(fn) {
     const originalProfile = await profileCmd.callback({}, '');
 
     // Skip switching if already on the target profile
-    if (originalProfile === targetProfile) {
+    if (originalProfile === targetProfileName) {
         return fn();
     }
 
     try {
-        console.log(`[TunnelVision] Switching to connection profile: "${targetProfile}"`);
-        await profileCmd.callback({ await: 'true', timeout: '5000' }, targetProfile);
+        console.log(`[TunnelVision] Switching to connection profile: "${targetProfileName}"`);
+        await profileCmd.callback({ await: 'true', timeout: '5000' }, targetProfileName);
         return await fn();
     } finally {
         await profileCmd.callback({ await: 'true', timeout: '5000' }, originalProfile || '<None>');

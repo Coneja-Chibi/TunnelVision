@@ -35,7 +35,7 @@ import {
   findCategoryByLabel,
   findOrCreateChildCategory,
 } from "./tree-categories.js";
-import { getActiveTunnelVisionBooks, getWritableBooks } from "./tool-registry.js";
+import { getActiveTunnelVisionBooks } from "./tool-registry.js";
 import {
   getCachedWorldInfo,
   buildUidMap,
@@ -160,7 +160,7 @@ function shouldRunLifecycle() {
   const settings = getSettings();
   if (!settings.lifecycleEnabled || settings.globalEnabled === false)
     return false;
-  if (getWritableBooks().length === 0) return false;
+  if (getActiveTunnelVisionBooks().length === 0) return false;
 
   const context = getContext();
   const chatLength = context.chat?.length || 0;
@@ -200,8 +200,6 @@ export async function runLifecycleMaintenance(force = false) {
 
   const activeBooks = getActiveTunnelVisionBooks();
   if (activeBooks.length === 0) return null;
-  const writableBooks = getWritableBooks();
-  if (writableBooks.length === 0) return null;
 
   const chatId = getChatId();
   _lifecycleRunning = true;
@@ -225,7 +223,7 @@ export async function runLifecycleMaintenance(force = false) {
   console.log("[TunnelVision] Memory lifecycle maintenance starting");
 
   try {
-    for (const bookName of writableBooks) {
+    for (const bookName of activeBooks) {
       if (getChatId() !== chatId || task.cancelled) break;
 
       const bookData = await getCachedWorldInfo(bookName);
@@ -270,7 +268,7 @@ export async function runLifecycleMaintenance(force = false) {
 
     if (!task.cancelled) {
       let maxOrderValue = 0;
-      for (const bookName of writableBooks) {
+      for (const bookName of activeBooks) {
         const bd = await getCachedWorldInfo(bookName);
         if (!bd?.entries) continue;
         for (const key of Object.keys(bd.entries)) {
@@ -295,7 +293,7 @@ export async function runLifecycleMaintenance(force = false) {
 
       // Count total entries for adaptive lifecycle tracking
       let totalEntries = 0;
-      for (const bookName of writableBooks) {
+      for (const bookName of activeBooks) {
         const bd = await getCachedWorldInfo(bookName);
         if (!bd?.entries) continue;
         for (const key of Object.keys(bd.entries)) {
@@ -734,12 +732,6 @@ async function compressVerboseEntries(bookName, bookData, chatId) {
       const uidMap = buildUidMap(freshBookData.entries);
       const freshEntry = uidMap.get(entry.uid);
       if (!freshEntry) continue;
-      if ((freshEntry.content || "") !== entry.content) {
-        console.warn(
-          `[TunnelVision] Lifecycle: skipped compression for "${entry.title}" because it changed during analysis`,
-        );
-        continue;
-      }
 
       recordEntryVersion(bookName, entry.uid, {
         source: "lifecycle",

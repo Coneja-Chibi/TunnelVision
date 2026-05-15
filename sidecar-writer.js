@@ -32,7 +32,7 @@ import { getDefinition as getForgetDef } from './tools/forget.js';
 import { getDefinition as getReorganizeDef } from './tools/reorganize.js';
 import { getDefinition as getMergeSplitDef } from './tools/merge-split.js';
 import { logSidecarWrite } from './activity-feed.js';
-import { applyBackgroundPromptAddendum, buildLanguageDirective, getChatId } from './agent-utils.js';
+import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
 
 // ─── Tree Overview (shared format with sidecar-retrieval.js) ─────
 
@@ -569,126 +569,41 @@ async function executeWriteOps(ops, reasoning = '') {
 
 // ─── Main Entry Point ────────────────────────────────────────────
 
-let _writerRunning = false;
-let _queuedWriterRequest = null;
-
-function captureWriterSnapshot(expectedMessageId) {
-    try {
-        const chat = getContext()?.chat || [];
-        const messageId = Number.isInteger(expectedMessageId) ? expectedMessageId : chat.length - 1;
-        const msg = chat[messageId];
-        if (!msg) return null;
-        return {
-            messageId,
-            chatLength: chat.length,
-            fingerprint: JSON.stringify({
-                is_user: !!msg.is_user,
-                name: msg.name || '',
-                mes: msg.mes || '',
-                swipe_id: msg.swipe_id ?? msg.extra?.swipe_id ?? null,
-                swipes: Array.isArray(msg.swipes) ? msg.swipes : null,
-            }),
-        };
-    } catch {
-        return null;
-    }
-}
-
-function isWriterSnapshotCurrent(snapshot) {
-    if (!snapshot) return true;
-    try {
-        const chat = getContext()?.chat || [];
-        if (chat.length !== snapshot.chatLength) return false;
-        const msg = chat[snapshot.messageId];
-        if (!msg) return false;
-        const currentFingerprint = JSON.stringify({
-            is_user: !!msg.is_user,
-            name: msg.name || '',
-            mes: msg.mes || '',
-            swipe_id: msg.swipe_id ?? msg.extra?.swipe_id ?? null,
-            swipes: Array.isArray(msg.swipes) ? msg.swipes : null,
-        });
-        return currentFingerprint === snapshot.fingerprint;
-    } catch {
-        return false;
-    }
-}
-
 /**
  * Run sidecar post-generation writer.
  * Called after MESSAGE_RECEIVED in index.js.
  *
  * @returns {Promise<void>}
  */
-export async function runSidecarWriter({ expectedChatId = null, expectedMessageId = null } = {}) {
-    if (_writerRunning) {
-        _queuedWriterRequest = { expectedChatId, expectedMessageId };
-        console.debug('[TunnelVision] Sidecar post-gen writer already running; queued latest run');
-        return;
-    }
-    const startChatId = getChatId();
-    if (expectedChatId && startChatId !== expectedChatId) {
-        console.debug('[TunnelVision] Sidecar post-gen writer skipped: chat changed before start');
-        return;
-    }
-    _writerRunning = true;
-    let settings;
-    let treeOverview = '';
-    let recentChat = '';
-    let sourceSnapshot = null;
-    try {
-        settings = getSettings();
+export async function runSidecarWriter() {
+    const settings = getSettings();
 
     // Guard: must be enabled and sidecar must be configured
-    if (!settings.sidecarPostGenWriter) {
-        _writerRunning = false;
-        return;
-    }
+    if (!settings.sidecarPostGenWriter) return;
     if (!isSidecarConfigured()) {
-        _writerRunning = false;
         console.debug('[TunnelVision] Sidecar post-gen writer enabled but no sidecar configured — skipping');
         return;
     }
 
     const activeBooks = getReadableBooks();
-    if (activeBooks.length === 0) {
-        _writerRunning = false;
-        return;
-    }
+    if (activeBooks.length === 0) return;
     if (getWritableBooks().length === 0) {
-        _writerRunning = false;
         console.debug('[TunnelVision] Sidecar post-gen writer: no writable lorebooks');
         return;
     }
 
     // Build tree overview (includes entry titles for update reference)
-    treeOverview = '';
-    try {
-        treeOverview = await buildWriterTreeOverview();
-    } catch (error) {
-        _writerRunning = false;
-        console.error('[TunnelVision] Sidecar post-gen writer failed to build tree overview:', error);
-        return;
-    }
+    const treeOverview = await buildWriterTreeOverview();
     if (!treeOverview.trim()) {
-        _writerRunning = false;
         console.debug('[TunnelVision] Sidecar post-gen writer: no tree content');
         return;
     }
 
     // Extract recent chat including the new response
     const contextMessages = settings.sidecarWriterContextMessages ?? 15;
-    recentChat = extractRecentChat(contextMessages);
-    sourceSnapshot = captureWriterSnapshot(expectedMessageId);
+    const recentChat = extractRecentChat(contextMessages);
     if (!recentChat.trim()) {
-        _writerRunning = false;
         console.debug('[TunnelVision] Sidecar post-gen writer: no recent chat context');
-        return;
-    }
-
-    } catch (error) {
-        _writerRunning = false;
-        console.error('[TunnelVision] Sidecar post-gen writer failed before sidecar request:', error);
         return;
     }
 
@@ -709,15 +624,6 @@ export async function runSidecarWriter({ expectedChatId = null, expectedMessageI
         const { ops, reasoning } = parseWriteOps(response);
         if (ops.length === 0) {
             console.log('[TunnelVision] Sidecar post-gen writer: no write operations needed');
-            return;
-        }
-
-        if (getChatId() !== startChatId || (expectedChatId && getChatId() !== expectedChatId)) {
-            console.debug('[TunnelVision] Sidecar post-gen writer skipped: chat changed before writes');
-            return;
-        }
-        if (!isWriterSnapshotCurrent(sourceSnapshot)) {
-            console.debug('[TunnelVision] Sidecar post-gen writer skipped: source message changed before writes');
             return;
         }
 
@@ -768,14 +674,5 @@ export async function runSidecarWriter({ expectedChatId = null, expectedMessageI
         console.groupEnd();
     } catch (error) {
         console.error('[TunnelVision] Sidecar post-gen writer failed:', error);
-    } finally {
-        _writerRunning = false;
-        const queued = _queuedWriterRequest;
-        _queuedWriterRequest = null;
-        if (queued) {
-            setTimeout(() => {
-                void runSidecarWriter(queued);
-            }, 0);
-        }
     }
 }

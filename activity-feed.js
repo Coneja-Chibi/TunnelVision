@@ -272,10 +272,8 @@ function createTriggerButton() {
             dragging = true;
         }
         if (dragging) {
-            const viewportWidth = (window.visualViewport ? window.visualViewport.width : window.innerWidth);
-            const x = Math.max(0, Math.min(viewportWidth - 40, e.clientX - offsetX));
-            const viewportHeight = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
-            const y = Math.max(0, Math.min(viewportHeight - 40, e.clientY - offsetY));
+            const x = Math.max(0, Math.min(window.innerWidth - 40, e.clientX - offsetX));
+            const y = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - offsetY));
             triggerEl.style.left = `${x}px`;
             triggerEl.style.top = `${y}px`;
             triggerEl.style.bottom = 'auto';

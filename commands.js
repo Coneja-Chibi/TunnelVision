@@ -21,9 +21,6 @@
  */
 
 import { getContext } from '../../../st-context.js';
-import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
-import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
-import { SlashCommandArgument, ARGUMENT_TYPE } from '../../../slash-commands/SlashCommandArgument.js';
 import { loadWorldInfo } from '../../../world-info.js';
 import { canReadBook, canWriteBook, getSettings, getSelectedLorebook, getTree, createTreeNode, saveTree, findNodeById } from './tree-store.js';
 import { getActiveTunnelVisionBooks, resolveTargetBook } from './tool-registry.js';
@@ -53,117 +50,20 @@ export function initCommands() {
 // ---------------------------------------------------------------------------
 
 function registerSlashCommands() {
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-search',
-        callback: wrapCallback(handleSearch),
-        helpString: 'Search TunnelVision lorebook entries.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Search query',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
+    const registerSlashCommand = getContext()?.registerSlashCommand;
+    if (typeof registerSlashCommand !== 'function') {
+        console.error('[TunnelVision] Slash command API is unavailable; /tv-* commands were not registered');
+        return;
+    }
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-remember',
-        callback: wrapCallback(handleRemember),
-        helpString: 'Save content to TunnelVision memory.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Content to remember',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-summarize',
-        callback: wrapCallback(handleSummarize),
-        helpString: 'Create a TunnelVision scene summary from recent chat.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Summary title',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-forget',
-        callback: wrapCallback(handleForget),
-        helpString: 'Forget/disable a TunnelVision lorebook entry.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Entry name or UID to forget',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-merge',
-        callback: wrapCallback(handleMerge),
-        helpString: 'Merge duplicate/related TunnelVision lorebook entries.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Hint about which entries to merge (optional — auto-detects duplicates)',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-split',
-        callback: wrapCallback(handleSplit),
-        helpString: 'Split a multi-topic TunnelVision lorebook entry into focused pieces.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Entry name or UID to split',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-dedupe',
-        callback: wrapCallback(handleDedupe),
-        helpString: 'Batch-merge all duplicate/near-duplicate entries in a TunnelVision lorebook. Moves absorbed entries to a "Deduped" node for review.',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Target lorebook name (optional if only one active)',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
-
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'tv-ingest',
-        callback: wrapCallback(handleIngestCommand),
-        helpString: 'Ingest recent chat messages into a TunnelVision lorebook (no generation).',
-        unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'Target lorebook name (optional if only one active)',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: false,
-            }),
-        ],
-        returns: 'empty string',
-    }));
+    registerSlashCommand('tv-search', wrapCallback(handleSearch), [], 'Search TunnelVision lorebook entries.');
+    registerSlashCommand('tv-remember', wrapCallback(handleRemember), [], 'Save content to TunnelVision memory.');
+    registerSlashCommand('tv-summarize', wrapCallback(handleSummarize), [], 'Create a TunnelVision scene summary from recent chat.');
+    registerSlashCommand('tv-forget', wrapCallback(handleForget), [], 'Forget/disable a TunnelVision lorebook entry.');
+    registerSlashCommand('tv-merge', wrapCallback(handleMerge), [], 'Merge duplicate/related TunnelVision lorebook entries.');
+    registerSlashCommand('tv-split', wrapCallback(handleSplit), [], 'Split a multi-topic TunnelVision lorebook entry into focused pieces.');
+    registerSlashCommand('tv-dedupe', wrapCallback(handleDedupe), [], 'Batch-merge all duplicate/near-duplicate entries in a TunnelVision lorebook.');
+    registerSlashCommand('tv-ingest', wrapCallback(handleIngestCommand), [], 'Ingest recent chat messages into a TunnelVision lorebook.');
 }
 
 // ---------------------------------------------------------------------------
