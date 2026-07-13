@@ -27,9 +27,20 @@ import { getReadableBooks } from './tool-registry.js';
 import { hasEvaluableConditions, separateConditions, mapSelectiveLogic, describeSelectiveLogic, CONDITION_DESCRIPTIONS, CONDITION_LABELS, rollKeywordProbability, formatCondition } from './conditions.js';
 import { isSidecarConfigured, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { logSidecarRetrieval, logConditionalEvaluations, setSidecarActive } from './activity-feed.js';
+import { getKeywordTriggeredUids } from './index.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
 
 const TV_SIDECAR_RETRIEVAL_KEY = 'tunnelvision_sidecar_retrieval';
+
+let lastInjectedNodeIds = [];
+
+/**
+ * Get the list of node IDs currently injected into the context by the sidecar.
+ * @returns {string[]}
+ */
+export function getInjectedNodeIds() {
+    return lastInjectedNodeIds;
+}
 
 // ─── Tree Overview (reuses collapsed-tree format from search.js) ─────
 
@@ -233,10 +244,11 @@ function buildConditionalSection(conditionalEntries) {
 /**
  * Resolve node IDs to entry content across all active lorebooks.
  * @param {string[]} nodeIds
- * @returns {Promise<string>}
+ * @returns {Promise<{ text: string, entries: Array<{ lorebook: string, uid: number, title: string }> }>}
  */
 async function resolveNodeContent(nodeIds) {
     const results = [];
+    const entries = [];
     const seenEntries = new Set();
 
     for (const nodeId of nodeIds) {
@@ -256,16 +268,20 @@ async function resolveNodeContent(nodeIds) {
                 if (seenEntries.has(entryKey)) continue;
                 seenEntries.add(entryKey);
 
+                // Skip if already in context via keyword trigger
+                if (getKeywordTriggeredUids().has(Number(uid))) continue;
+
                 const entry = findEntryByUid(bookData.entries, uid);
                 if (!entry?.content || entry.disable) continue;
 
                 const title = entry.comment || entry.key?.[0] || `Entry #${uid}`;
                 results.push(`[${bookName} | ${title}]\n${entry.content}`);
+                entries.push({ lorebook: bookName, uid: Number(uid), title });
             }
         }
     }
 
-    return results.join('\n\n');
+    return { text: results.join('\n\n'), entries };
 }
 
 /**
@@ -401,6 +417,9 @@ async function resolveConditionalContent(evaluations, conditionalEntries) {
     for (const ce of conditionalEntries) {
         if (!acceptedUids.has(ce.uid)) continue;
 
+        // Skip if already in context via keyword trigger
+        if (getKeywordTriggeredUids().has(Number(ce.uid))) continue;
+
         const bookData = await loadWorldInfo(ce.bookName);
         if (!bookData?.entries) continue;
 
@@ -474,6 +493,8 @@ export async function runSidecarRetrieval() {
             return;
         }
 
+        lastInjectedNodeIds = [...nodeIds];
+
         // Injection settings
         const position = mapPosition(settings.mandatoryPromptPosition);
         const depth = settings.mandatoryPromptDepth ?? 1;
@@ -482,9 +503,11 @@ export async function runSidecarRetrieval() {
 
         // Resolve node content (tree-based retrieval)
         let injectionParts = [];
+        let retrievedEntries = [];
 
         if (nodeIds.length > 0) {
-            const nodeContent = await resolveNodeContent(nodeIds);
+            const { text: nodeContent, entries: nodeEntries } = await resolveNodeContent(nodeIds);
+            retrievedEntries = nodeEntries;
             if (nodeContent.trim()) {
                 injectionParts.push(nodeContent);
             }
@@ -531,7 +554,7 @@ export async function runSidecarRetrieval() {
 
         const _modelLabel = getSidecarModelLabel() || 'unknown';
         console.log(`[TunnelVision] Sidecar auto-retrieval [${_modelLabel}]: injected ${nodeIds.length} node(s) + ${conditionalEvaluations.filter(e => e.accepted).length} conditional(s) (~${capped.length} chars)`);
-        logSidecarRetrieval({ nodeIds, nodeLabels, charCount: capped.length, reasoning });
+        logSidecarRetrieval({ nodeIds, nodeLabels, entries: retrievedEntries, charCount: capped.length, reasoning });
 
         // Detailed console output for sidecar transparency
         console.groupCollapsed(`[TunnelVision] Sidecar retrieval details (${_modelLabel})`);
@@ -561,6 +584,7 @@ export async function runSidecarRetrieval() {
  * @param {Object} settings
  */
 function clearRetrievalPrompt(settings) {
+    lastInjectedNodeIds = [];
     const position = mapPosition(settings.mandatoryPromptPosition);
     const depth = settings.mandatoryPromptDepth ?? 1;
     const role = mapRole(settings.mandatoryPromptRole);

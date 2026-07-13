@@ -6,7 +6,9 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
+import { getContext } from '../../../st-context.js';
 import { loadWorldInfo } from '../../../world-info.js';
+import { trigramSimilarity } from './agent-utils.js';
 
 const EXTENSION_NAME = 'tunnelvision';
 const TRACKER_TITLE_PREFIX = /^\[tracker[^\]]*\]/i;
@@ -271,11 +273,8 @@ export const SETTING_DEFAULTS = {
     globalEnabled: true,
     trees: {},
     enabledLorebooks: {},
-    selectedLorebook: null,
+    selectedLorebook: null, // DEPRECATED: migration source only; selection now lives in chat_metadata
     bookDescriptions: {},
-    connectionProfile: null,
-    sidecarTemperature: 0.2,
-    sidecarMaxTokens: 8192,
     disabledTools: {},
     searchMode: 'traversal',
     collapsedDepth: 2,
@@ -310,6 +309,24 @@ export const SETTING_DEFAULTS = {
     backgroundPromptAddendum: '',
     confirmTools: {},
     toolPromptOverrides: {},
+    // Sidecar LLM — self-contained direct-API config (issue #29: own key, no allowKeysExposure)
+    sidecarProfile: {
+        enabled: false,
+        endpoint: '',       // e.g. https://api.openai.com/v1
+        apiKey: '',         // plaintext; only this key is at risk, not all ST keys
+        model: '',
+        format: 'openai',   // 'openai' | 'anthropic' | 'google'
+        maxTokens: 1000,
+        temperature: 0.3,
+    },
+    // Embedding sidecar — separate endpoint for vector dedup / similarity
+    embeddingProfile: {
+        enabled: false,
+        endpoint: '',
+        apiKey: '',         // may be empty for local endpoints
+        model: '',
+        format: 'openai',   // 'openai' | 'google' | 'gemini'
+    },
     // Sidecar auto-retrieval (pre-gen)
     sidecarAutoRetrieval: false,
     sidecarContextMessages: 10,
@@ -364,8 +381,21 @@ function ensureSettings() {
         didMutate = true;
     }
 
-    if (normalizeConnectionProfileSetting(s)) {
+    // Migration (issue #29): old connectionProfile-based sidecar is gone. Drop the
+    // stale setting and tell the user once to re-enter their key in the new fields.
+    if (Object.prototype.hasOwnProperty.call(s, 'connectionProfile')) {
+        delete s.connectionProfile;
         didMutate = true;
+        try {
+            if (!localStorage.getItem('tv_sidecar_migration_notified')) {
+                localStorage.setItem('tv_sidecar_migration_notified', '1');
+                toastr?.info(
+                    'TunnelVision sidecar now uses its own API key — re-enter it under TunnelVision settings → Sidecar LLM.',
+                    'TunnelVision',
+                    { timeOut: 12000 },
+                );
+            }
+        } catch { /* localStorage/toastr may be unavailable */ }
     }
 
     for (const [bookName, tree] of Object.entries(s.trees || {})) {
@@ -382,6 +412,76 @@ function ensureSettings() {
 export function getSettings() {
     ensureSettings();
     return extension_settings[EXTENSION_NAME];
+}
+
+function deduplicateUidsAcrossTree(node) {
+    let mutated = false;
+    for (const child of (node.children || [])) {
+        if (deduplicateUidsAcrossTree(child)) mutated = true;
+    }
+    if (node.children && node.children.length > 0) {
+        const descendantUids = new Set();
+        for (const child of node.children) {
+            for (const uid of getAllEntryUids(child)) descendantUids.add(uid);
+        }
+        const before = node.entryUids.length;
+        node.entryUids = node.entryUids.filter(uid => !descendantUids.has(uid));
+        if (node.entryUids.length !== before) mutated = true;
+    }
+    return mutated;
+}
+
+export function consolidateSiblingNodes(node, labelThreshold = 0.65, containThreshold = 0.60) {
+    let absorbed = 0;
+
+    for (const child of (node.children || [])) {
+        absorbed += consolidateSiblingNodes(child, labelThreshold, containThreshold);
+    }
+
+    const children = node.children;
+    if (!children || children.length < 2) return absorbed;
+
+    const toAbsorb = new Set();
+    for (let i = 0; i < children.length; i++) {
+        if (toAbsorb.has(i)) continue;
+        for (let j = i + 1; j < children.length; j++) {
+            if (toAbsorb.has(j)) continue;
+
+            const labelSim = trigramSimilarity(
+                children[i].label.toLowerCase(),
+                children[j].label.toLowerCase(),
+            );
+
+            const uidsI = new Set(getAllEntryUids(children[i]));
+            const uidsJ = new Set(getAllEntryUids(children[j]));
+            const smaller = uidsI.size <= uidsJ.size ? uidsI : uidsJ;
+            const larger  = uidsI.size <= uidsJ.size ? uidsJ : uidsI;
+            const containment = smaller.size >= 2
+                ? [...smaller].filter(u => larger.has(u)).length / smaller.size
+                : 0;
+
+            if (labelSim < labelThreshold && containment < containThreshold) continue;
+
+            const wi = uidsI.size >= uidsJ.size ? i : j;
+            const li = wi === i ? j : i;
+
+            for (const uid of children[li].entryUids) {
+                if (!children[wi].entryUids.includes(uid)) {
+                    children[wi].entryUids.push(uid);
+                }
+            }
+            children[wi].children.push(...(children[li].children || []));
+            toAbsorb.add(li);
+            absorbed++;
+        }
+    }
+
+    if (toAbsorb.size > 0) {
+        node.children = children.filter((_, idx) => !toAbsorb.has(idx));
+        absorbed += consolidateSiblingNodes(node, labelThreshold, containThreshold);
+    }
+
+    return absorbed;
 }
 
 function normalizeTree(tree, lorebookName) {
@@ -409,6 +509,10 @@ function normalizeTree(tree, lorebookName) {
     }
 
     if (normalizeTreeNode(tree.root)) {
+        mutated = true;
+    }
+
+    if (deduplicateUidsAcrossTree(tree.root)) {
         mutated = true;
     }
 
@@ -487,29 +591,6 @@ function normalizeTrackerSettings(settings) {
     return mutated;
 }
 
-function normalizeConnectionProfileSetting(settings) {
-    const current = settings.connectionProfile;
-    if (!current || typeof current !== 'string') return false;
-
-    const profiles = getConnectionProfiles();
-    if (profiles.some(profile => profile.id === current)) {
-        return false;
-    }
-
-    const legacyMatch = profiles.find(profile => profile.name === current);
-    if (legacyMatch) {
-        settings.connectionProfile = legacyMatch.id;
-        return true;
-    }
-
-    return false;
-}
-
-function getConnectionProfiles() {
-    const profiles = extension_settings?.connectionManager?.profiles;
-    return Array.isArray(profiles) ? profiles : [];
-}
-
 function resolveEntriesMap(entriesOrBookData) {
     if (!entriesOrBookData || typeof entriesOrBookData !== 'object') return null;
     if (entriesOrBookData.entries && typeof entriesOrBookData.entries === 'object') {
@@ -534,42 +615,44 @@ function storeTrackerSet(bookName, trackerSet) {
     }
 }
 
+const SELECTED_BOOK_KEY = 'tunnelvision_selected_book';
+
 export function getSelectedLorebook() {
-    const settings = getSettings();
-    return settings.selectedLorebook || null;
+    try {
+        return getContext().chatMetadata?.[SELECTED_BOOK_KEY] || null;
+    } catch {
+        return null; // no active chat
+    }
 }
 
 export function setSelectedLorebook(lorebookName) {
-    const settings = getSettings();
-    settings.selectedLorebook = lorebookName || null;
-    saveSettingsDebounced();
+    try {
+        const context = getContext();
+        if (!context.chatMetadata) return; // no active chat
+        if (lorebookName) {
+            context.chatMetadata[SELECTED_BOOK_KEY] = lorebookName;
+        } else {
+            delete context.chatMetadata[SELECTED_BOOK_KEY];
+        }
+        context.saveMetadataDebounced?.();
+    } catch {
+        /* no active chat — no-op */
+    }
 }
 
-export function getConnectionProfileId() {
-    const settings = getSettings();
-    return settings.connectionProfile || null;
-}
-
-export function setConnectionProfileId(profileId) {
-    const settings = getSettings();
-    settings.connectionProfile = profileId || null;
-    saveSettingsDebounced();
-}
-
-export function findConnectionProfile(profileRef = null) {
-    const ref = profileRef ?? getConnectionProfileId();
-    if (!ref) return null;
-
-    const profiles = getConnectionProfiles();
-    return profiles.find(profile => profile.id === ref || profile.name === ref) || null;
-}
-
-export function getConnectionProfileName(profileRef = null) {
-    return findConnectionProfile(profileRef)?.name || null;
-}
-
-export function listConnectionProfiles() {
-    return [...getConnectionProfiles()];
+export function migrateSelectedLorebook(activeBooks) {
+    try {
+        const context = getContext();
+        if (!context.chatMetadata) return;           // no active chat
+        if (context.chatMetadata[SELECTED_BOOK_KEY]) return; // chat already chose
+        const legacy = getSettings().selectedLorebook;
+        if (legacy && Array.isArray(activeBooks) && activeBooks.includes(legacy)) {
+            context.chatMetadata[SELECTED_BOOK_KEY] = legacy;
+            context.saveMetadataDebounced?.();
+        }
+    } catch {
+        /* no active chat — skip */
+    }
 }
 
 // ─── Per-Lorebook Permissions ────────────────────────────────────

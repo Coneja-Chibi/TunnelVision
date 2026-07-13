@@ -39,7 +39,6 @@ import {
   buildUidMap,
   parseJsonFromLLM,
   recordEntryTemporal,
-  KEYWORD_RULES,
   FACT_EXTRACTION_PROMPT,
 } from "./entry-manager.js";
 import { markAutoSummaryComplete } from "./auto-summary.js";

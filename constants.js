@@ -104,7 +104,7 @@ export const AUTO_CLASSIFY_THRESHOLD = 0.35;
  *
  * @see post-turn-processor.js — analyzeExchange dedup logic
  */
-export const DEDUP_SIMILARITY_THRESHOLD = 0.7;
+export const DEDUP_SIMILARITY_THRESHOLD = 0.62;
 
 /**
  * Minimum trigram overlap to even consider two entries as duplicate
@@ -467,7 +467,7 @@ export const LIFECYCLE_SIMILARITY_BUDGET_RATIO = 0.6;
  *
  * @see post-turn-processor.js — analyzeExchange
  */
-export const MAX_EXISTING_FACTS = 50;
+export const MAX_EXISTING_FACTS = 150;
 
 /**
  * Minimum character mention count across extracted facts before

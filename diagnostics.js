@@ -85,6 +85,7 @@ export async function runDiagnostics() {
     results.push(checkAutoSummaryConfig());
     results.push(checkMultiBookMode());
     results.push(await checkSidecarConfig());
+    results.push(await checkEmbeddingConfig());
     results.push(...await checkTrackerUids());
     results.push(...checkArcNodes());
     results.push(checkNotebookConfig());
@@ -1153,49 +1154,43 @@ function checkMultiBookMode() {
     return warn(`Invalid multi-book mode "${oldValue}". Auto-reset to "unified".`);
 }
 
-/** Check sidecar LLM configuration: connection profile, API key availability. */
+/** Check sidecar LLM configuration (self-contained profile — no ST secrets). */
 async function checkSidecarConfig() {
     const settings = getSettings();
-    const profileId = settings.connectionProfile;
+    const profile = settings.sidecarProfile;
 
-    if (!profileId) {
-        return pass('Sidecar LLM: not configured (using ST generateRaw fallback)');
+    if (!profile?.enabled) {
+        return pass('Sidecar LLM: disabled (using ST generateRaw fallback)');
     }
 
-    const { findConnectionProfile } = await import('./tree-store.js');
-    const profile = findConnectionProfile(profileId);
-
-    if (!profile) {
-        return warn(`Sidecar: Connection profile "${profileId}" not found. It may have been deleted from Connection Manager.`);
+    const { getSidecarConfig } = await import('./llm-sidecar.js');
+    const config = getSidecarConfig();
+    if (!config) {
+        return warn('Sidecar LLM is enabled but endpoint or API key is missing. Fill in the Sidecar LLM profile in TunnelVision settings.');
     }
 
-    if (!profile.api || !profile.model) {
-        return warn(`Sidecar: Connection profile "${profile.name}" is missing API provider or model. Sidecar calls will fall back to generateRaw.`);
+    return pass(`Sidecar LLM: ${config.format} → ${config.model || '(model unset)'} @ ${config.endpoint}`);
+}
+
+/** Check embedding sidecar configuration. */
+async function checkEmbeddingConfig() {
+    const settings = getSettings();
+    const profile = settings.embeddingProfile;
+
+    if (!profile?.enabled) {
+        return pass('Embedding sidecar: disabled');
     }
 
-    // Verify API key is available via ST's secrets system
-    try {
-        const { fetchSecretKey, isSidecarKeyAvailable } = await import('./llm-sidecar.js');
-        const PROVIDER_SECRET_MAP = {
-            openai: 'api_key_openai', claude: 'api_key_claude', openrouter: 'api_key_openrouter',
-            makersuite: 'api_key_makersuite', deepseek: 'api_key_deepseek', mistralai: 'api_key_mistralai',
-            groq: 'api_key_groq', custom: 'api_key_custom', xai: 'api_key_xai',
-        };
-        const secretKey = PROVIDER_SECRET_MAP[profile.api];
-        if (secretKey) {
-            const key = await fetchSecretKey(secretKey);
-            if (!key) {
-                if (!isSidecarKeyAvailable()) {
-                    return warn(`Sidecar: API key access was denied (HTTP 403). Set "allowKeysExposure: true" in SillyTavern\'s config.yaml so TunnelVision can read keys for direct sidecar calls.`);
-                }
-                return warn(`Sidecar: No API key found for "${profile.api}". Add your key in ST\'s API settings.`);
-            }
-        }
-    } catch (e) {
-        return warn(`Sidecar: Failed to verify API key: ${e.message}`);
+    const { getEmbeddingConfig, isEmbeddingSupported } = await import('./llm-sidecar.js');
+    const config = getEmbeddingConfig();
+    if (!config) {
+        return warn('Embedding sidecar is enabled but the endpoint is missing.');
+    }
+    if (!isEmbeddingSupported()) {
+        return warn(`Embedding sidecar format "${config.format}" is not supported (use openai, google, or gemini).`);
     }
 
-    return pass(`Sidecar LLM: "${profile.name}" (${profile.api} / ${profile.model})`);
+    return pass(`Embedding sidecar: ${config.format} → ${config.model || '(model unset)'} @ ${config.endpoint}`);
 }
 
 /** Check tracker UIDs reference valid entries, auto-remove stale, auto-detect title-based trackers. */
@@ -1544,8 +1539,8 @@ function checkSidecarAutoRetrieval() {
         return pass('Sidecar auto-retrieval: disabled');
     }
 
-    if (!settings.connectionProfile) {
-        return warn('Sidecar auto-retrieval is enabled but no connection profile is selected. Auto-retrieval requires a sidecar connection profile.');
+    if (!settings.sidecarProfile?.enabled) {
+        return warn('Sidecar auto-retrieval is enabled but the Sidecar LLM profile is disabled. Enable and configure it in TunnelVision settings.');
     }
 
     const maxTokens = settings.sidecarMaxInjectionTokens ?? 4000;
@@ -1562,8 +1557,8 @@ function checkSidecarPostGenWriter() {
         return pass('Sidecar post-gen writer: disabled');
     }
 
-    if (!settings.connectionProfile) {
-        return warn('Sidecar post-gen writer is enabled but no connection profile is selected. The writer requires a sidecar connection profile.');
+    if (!settings.sidecarProfile?.enabled) {
+        return warn('Sidecar post-gen writer is enabled but the Sidecar LLM profile is disabled. Enable and configure it in TunnelVision settings.');
     }
 
     const maxOps = settings.sidecarWriterMaxOps ?? 5;
@@ -1585,8 +1580,8 @@ function checkConditionalTriggers() {
         return warn('Narrative conditionals are enabled but sidecar auto-retrieval is OFF. Conditionals require auto-retrieval to evaluate. Enable "Auto-Retrieve Before Generation" in sidecar settings.');
     }
 
-    if (!settings.connectionProfile) {
-        return warn('Narrative conditionals are enabled but no sidecar connection profile is selected. Conditionals require a sidecar LLM to evaluate scene state.');
+    if (!settings.sidecarProfile?.enabled) {
+        return warn('Narrative conditionals are enabled but the Sidecar LLM profile is disabled. Conditionals require a sidecar LLM to evaluate scene state.');
     }
 
     return pass('Narrative conditionals: enabled (conditions on entries will be evaluated by sidecar)');

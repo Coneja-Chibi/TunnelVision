@@ -22,7 +22,7 @@
 
 import { getContext } from '../../../st-context.js';
 import { loadWorldInfo } from '../../../world-info.js';
-import { canReadBook, canWriteBook, getSettings, getSelectedLorebook, getTree, createTreeNode, saveTree, findNodeById } from './tree-store.js';
+import { canReadBook, canWriteBook, getSettings, getSelectedLorebook, getTree, createTreeNode, saveTree, findNodeById, consolidateSiblingNodes } from './tree-store.js';
 import { getActiveTunnelVisionBooks, resolveTargetBook } from './tool-registry.js';
 import { ingestChatMessages } from './tree-builder.js';
 import { createEntry, mergeEntries, splitEntry, forgetEntry, updateEntry, findEntryByUid } from './entry-manager.js';
@@ -572,7 +572,8 @@ const DEDUPE_SIMILARITY_THRESHOLD = 0.55;
 const DEDUPE_MAX_CLUSTERS_PER_BATCH = 8;
 
 /**
- * Find duplicate clusters using trigram similarity on content+title.
+ * Find duplicate clusters using trigram similarity on content+title,
+ * or title-only similarity (matching diagnostics' detection logic).
  * Returns groups of 2+ entries that are near-duplicates of each other.
  */
 function findDuplicateClusters(entries, threshold) {
@@ -588,12 +589,30 @@ function findDuplicateClusters(entries, threshold) {
         if (ra !== rb) parent.set(ra, rb);
     }
 
-    // Compare all pairs
+    function titlesMatch(a, b) {
+        const na = a.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const nb = b.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (na === nb) return true;
+        if (na.length > 3 && nb.length > 3 && (na.includes(nb) || nb.includes(na))) {
+            return Math.min(na.length, nb.length) / Math.max(na.length, nb.length) > 0.5;
+        }
+        const wordsA = na.split(' ').filter(w => w.length > 2);
+        const wordsB = nb.split(' ').filter(w => w.length > 2);
+        const [shorter, longer] = wordsA.length <= wordsB.length
+            ? [wordsA, new Set(wordsB)] : [wordsB, new Set(wordsA)];
+        if (shorter.length >= 2) {
+            const overlap = shorter.filter(w => longer.has(w)).length;
+            return overlap / shorter.length >= 0.8;
+        }
+        return false;
+    }
+
+    // Compare all pairs — cluster if title matches OR full-text trigram similarity meets threshold
     for (let i = 0; i < entries.length; i++) {
         for (let j = i + 1; j < entries.length; j++) {
             const textA = `${entries[i].title} ${entries[i].content}`.toLowerCase();
             const textB = `${entries[j].title} ${entries[j].content}`.toLowerCase();
-            if (trigramSimilarity(textA, textB) >= threshold) {
+            if (titlesMatch(entries[i].title, entries[j].title) || trigramSimilarity(textA, textB) >= threshold) {
                 union(entries[i].uid, entries[j].uid);
             }
         }
@@ -784,13 +803,24 @@ Return JSON — an array with one object per cluster:
         }
     }
 
-    if (mergedCount > 0) {
-        toastr.success(
-            `Deduplication complete: ${mergedCount} entries merged into their clusters. ` +
-            `${errorCount > 0 ? `${errorCount} error(s). ` : ''}` +
-            `Absorbed entries moved to "Deduped" node for review.`,
-            'TunnelVision',
-        );
+    // Consolidate near-duplicate tree category nodes
+    let nodesConsolidated = 0;
+    const tree = getTree(bookName);
+    if (tree?.root) {
+        nodesConsolidated = consolidateSiblingNodes(tree.root);
+        if (nodesConsolidated > 0) saveTree(bookName, tree);
+    }
+
+    if (mergedCount > 0 || nodesConsolidated > 0) {
+        const entryMsg = mergedCount > 0
+            ? `${mergedCount} entr${mergedCount === 1 ? 'y' : 'ies'} merged into their clusters. `
+            : '';
+        const nodeMsg = nodesConsolidated > 0
+            ? `${nodesConsolidated} category node${nodesConsolidated === 1 ? '' : 's'} consolidated. `
+            : '';
+        const errMsg = errorCount > 0 ? `${errorCount} error(s). ` : '';
+        const absorbMsg = mergedCount > 0 ? 'Absorbed entries moved to "Deduped" node for review.' : '';
+        toastr.success(`Deduplication complete: ${entryMsg}${nodeMsg}${errMsg}${absorbMsg}`, 'TunnelVision');
     } else {
         toastr.warning(
             `Deduplication finished but no merges succeeded (${errorCount} error(s)).`,

@@ -14,6 +14,8 @@ import {
     loadWorldInfo,
     createWorldInfoEntry,
     saveWorldInfo,
+    deleteWorldInfoEntry,
+    deleteWIOriginalDataValue,
 } from '../../../world-info.js';
 import {
     getTree,
@@ -70,9 +72,10 @@ export function invalidateWorldInfoCache(bookName) {
  * @param {string} params.comment - Entry title/comment
  * @param {string[]} [params.keys] - Primary trigger keys
  * @param {string} [params.nodeId] - Tree node to assign to (defaults to root)
+ * @param {string} [params.tv_tracker] - Optional tracking keyword for sidecar auto-cleanup
  * @returns {Promise<{uid: number, comment: string, nodeLabel: string}>}
  */
-export async function createEntry(bookName, { content, comment, keys, nodeId }) {
+export async function createEntry(bookName, { content, comment, keys, nodeId, tv_tracker }) {
     if (!content || !content.trim()) {
         throw new Error('Entry content cannot be empty.');
     }
@@ -94,18 +97,40 @@ export async function createEntry(bookName, { content, comment, keys, nodeId }) 
     // Populate fields
     newEntry.content = content.trim();
     newEntry.comment = comment.trim();
-    if (Array.isArray(keys) && keys.length > 0) {
-        newEntry.key = keys.map(k => String(k).trim()).filter(Boolean);
+    
+    let finalKeys = [];
+    if (Array.isArray(keys)) {
+        finalKeys = keys.map(k => String(k).trim()).filter(Boolean);
     }
+    
+    // Store tracking data as a native keyword so ST doesn't strip it
+    if (tv_tracker) {
+        finalKeys.push(tv_tracker);
+    }
+    
+    if (finalKeys.length > 0) {
+        newEntry.key = finalKeys;
+    }
+    
     // TunnelVision-managed entries: disable keyword triggering since retrieval is tree-based
     newEntry.selective = false;
     newEntry.constant = false;
     newEntry.disable = false;
 
-    // Persist to disk
+    // 1. Persist lorebook to disk FIRST (assigns final server-side UID)
     await saveWorldInfo(bookName, bookData, true);
+    
+    // 2. Refresh the local reference to get the assigned UID
+    const freshBook = await loadWorldInfo(bookName);
+    const finalizedEntry = Object.values(freshBook.entries).find(e => 
+        e.comment === comment.trim() && e.content === content.trim()
+    );
 
-    // Assign to tree node
+    if (!finalizedEntry) {
+        throw new Error('Failed to retrieve finalized entry after save.');
+    }
+
+    // 3. Assign to tree node using the FINAL UID
     let nodeLabel = 'Root';
     const tree = getTree(bookName);
     if (tree && tree.root) {
@@ -117,18 +142,19 @@ export async function createEntry(bookName, { content, comment, keys, nodeId }) 
                 nodeLabel = found.label;
             }
         }
-        addEntryToNode(targetNode, newEntry.uid);
+        addEntryToNode(targetNode, finalizedEntry.uid);
         saveTree(bookName, tree);
-    } else {
-        nodeLabel = '(no tree)';
     }
 
-    if (isTrackerTitle(newEntry.comment)) {
-        setTrackerUid(bookName, newEntry.uid, true);
+    // 4. Force SillyTavern UI to update
+    forceSTLorebookUIUpdate(bookName);
+
+    if (isTrackerTitle(finalizedEntry.comment)) {
+        setTrackerUid(bookName, finalizedEntry.uid, true);
     }
 
-    console.log(`[TunnelVision] Created entry "${comment}" (UID ${newEntry.uid}) in "${bookName}" → ${nodeLabel}`);
-    return { uid: newEntry.uid, comment: newEntry.comment, nodeLabel };
+    console.log(`[TunnelVision] Created entry "${comment}" (UID ${finalizedEntry.uid}) in "${bookName}" → ${nodeLabel}`);
+    return { uid: finalizedEntry.uid, comment: finalizedEntry.comment, nodeLabel };
 }
 
 /**
@@ -204,13 +230,8 @@ export async function forgetEntry(bookName, uid, hardDelete = false) {
     let action;
 
     if (hardDelete) {
-        // Find the correct key for this UID (keys are NOT the same as UIDs in ST)
-        for (const key of Object.keys(bookData.entries)) {
-            if (bookData.entries[key].uid === uid) {
-                delete bookData.entries[key];
-                break;
-            }
-        }
+        await deleteWorldInfoEntry(bookData, uid, { silent: true });
+        deleteWIOriginalDataValue(bookData, uid);
         action = 'deleted';
     } else {
         entry.disable = true;
@@ -389,12 +410,8 @@ export async function mergeEntries(bookName, keepUid, removeUid, opts = {}) {
 
     // Disable or delete the absorbed entry
     if (opts.hardDelete) {
-        for (const key of Object.keys(bookData.entries)) {
-            if (bookData.entries[key].uid === removeUid) {
-                delete bookData.entries[key];
-                break;
-            }
-        }
+        await deleteWorldInfoEntry(bookData, removeUid, { silent: true });
+        deleteWIOriginalDataValue(bookData, removeUid);
     } else {
         removeEntry.disable = true;
     }
@@ -515,6 +532,17 @@ function findNodeContainingUid(node, uid) {
         if (found) return found;
     }
     return null;
+}
+
+/**
+ * Force SillyTavern's native UI to redraw the entries list for a lorebook.
+ * @param {string} bookName
+ */
+export function forceSTLorebookUIUpdate(bookName) {
+    const sel = document.getElementById('world_editor_select');
+    if (sel && sel.options[sel.selectedIndex]?.textContent === bookName) {
+        sel.dispatchEvent(new Event('change'));
+    }
 }
 
 // ─── Utilities required by post-turn-processor & summary-hierarchy ───
@@ -717,16 +745,15 @@ export const FACT_EXTRACTION_PROMPT = `You are a memory curator for an ongoing r
 
 For each fact, provide:
 - title: A short, descriptive label (e.g. "Elena's fear of fire", "Tavern location")
-- content: The factual information, written in third person
-- keys: 3-5 searchable keywords
+- content: The factual information in third person. If the subject already appears in the "Already Known Facts" list below, write ONLY the new specific detail — do NOT restate who they are or repeat their general description.
+- keys: 3-8 searchable keywords — include character names, locations, objects, themes, and temporal markers
 - significance: "low" | "medium" | "high"
 
 Only extract facts that would be useful to recall in future scenes. Skip transient dialogue, greetings, and meta-commentary.
 
-{{KEYWORD_RULES}}
-
-Recent conversation:
-{{CONTEXT}}
+{existingFactsSection}
+{temporalContext}
+{inputSection}
 
 Respond with ONLY a JSON array of fact objects (no markdown, no code fences).`;
 

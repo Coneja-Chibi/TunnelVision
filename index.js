@@ -22,8 +22,8 @@ import { eventSource, event_types, extension_prompt_types, extension_prompt_role
 import { getContext } from '../../../st-context.js';
 import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
-import { getSettings, isLorebookEnabled, setLorebookEnabled, isNativeInjectionBook } from './tree-store.js';
-import { preflightToolRuntimeState, registerTools } from './tool-registry.js';
+import { getSettings, isLorebookEnabled, setLorebookEnabled, getTree, removeEntryFromTree, saveTree, isNativeInjectionBook, migrateSelectedLorebook } from './tree-store.js';
+import { preflightToolRuntimeState, registerTools, getActiveTunnelVisionBooks } from './tool-registry.js';
 import { resetSearchLoopTracker, resetSelectiveRetrievalTracker } from './tools/search.js';
 import { buildNotebookPrompt, resetNotebookWriteGuard } from './tools/notebook.js';
 import { flushPendingSummaryHide } from './tools/summarize.js';
@@ -33,9 +33,10 @@ import { initCommands } from './commands.js';
 import { initAutoSummary } from './auto-summary.js';
 import { initPostTurnProcessor } from './post-turn-processor.js';
 import { runSidecarRetrieval } from './sidecar-retrieval.js';
-import { runSidecarWriter } from './sidecar-writer.js';
+import { runSidecarWriter, revertMessageSnapshots, revertInvalidSnapshots, hydrateSnapshots } from './sidecar-writer.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
-import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, world_names, deleteWorldInfoEntry, deleteWIOriginalDataValue } from '../../../world-info.js';
+import { findEntryByUid } from './entry-manager.js';
 
 const EXTENSION_NAME = 'tunnelvision';
 const EXTENSION_FOLDER = `third-party/TunnelVision`;
@@ -166,11 +167,35 @@ async function init() {
 
     // Post-generation sidecar writer (remember/update after model responds)
     if (event_types.MESSAGE_RECEIVED) {
-        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+        eventSource.on(event_types.MESSAGE_RECEIVED, async (messageIndexOrId, type) => {
+            const context = getContext();
+            // Robust lookup: could be index or UID
+            const msg = context.chat[messageIndexOrId] || context.chat.find(m => m.mesId === messageIndexOrId);
+            const realMsgId = msg?.mesId;
+
+            // If swiped, cleanup old memories and revert updates from the previous response
+            if (type === 'swipe') {
+                await revertInvalidSnapshots();
+                await cleanInvalidSidecarMemories();
+            }
+            await onMessageReceived(realMsgId, type);
+        });
     }
 
-    // Orphaned tool invocations are cleaned during generation preflight. Doing
-    // it directly from MESSAGE_DELETED mutates chat without updating ST's DOM.
+    // Clean up orphaned tool invocations when messages are deleted
+    if (event_types.MESSAGE_DELETED) {
+        eventSource.on(event_types.MESSAGE_DELETED, async (messageIndexOrId) => {
+            cleanOrphanedToolInvocations();
+
+            // ST passes chat.length (post-deletion) as the argument, not the deleted message's ID.
+            // Use revertInvalidSnapshots() which scans all snapshots against the current chat state.
+            await revertInvalidSnapshots();
+
+            // Fallback: full scan for untracked ghosts (keyword-based cleanup)
+            await new Promise(r => setTimeout(r, 300));
+            await cleanInvalidSidecarMemories();
+        });
+    }
 
     // Refresh connection profile dropdown when profiles change
     if (event_types.CONNECTION_PROFILE_CREATED) {
@@ -187,6 +212,15 @@ async function init() {
 }
 
 async function onChatChanged() {
+    // Rehydrate sidecar snapshots from this chat's metadata so revert-on-deletion
+    // survives a page reload / chat switch.
+    hydrateSnapshots();
+    // One-time migration of the legacy global selection into this chat's metadata.
+    // Active-book guard ensures a stale cross-character book is never copied.
+    migrateSelectedLorebook(getActiveTunnelVisionBooks());
+    // Catch slash command deletions (like /cut) which might not emit MESSAGE_DELETED
+    await cleanInvalidSidecarMemories();
+    // autoDetectLorebooks + refreshUI + registerTools
     await refreshRuntimeState('chat changed');
 }
 
@@ -924,18 +958,24 @@ async function onGenerationStarted(type, opts, dryRun) {
     window.TunnelVision_isRecursiveToolPass = isRecursiveToolPass;
     window.TunnelVision_toolRecursionDepth = _toolRecursionDepth;
 
+    const settings = getSettings();
+
     // On recursive passes, clear the mandatory tool prompt so the model isn't
     // told "you MUST call a tool" when it already has tool results and should
     // be writing the actual response. Then skip all other heavy work.
     if (isRecursiveToolPass) {
-        setExtensionPrompt(TV_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        const mandatoryPosition = mapPositionSetting(settings.mandatoryPromptPosition);
+        const mandatoryDepth = settings.mandatoryPromptDepth ?? 1;
+        const mandatoryRoleSetting = (settings.mandatoryPromptPosition === 'in_chat' && settings.mandatoryPromptRole === 'user')
+            ? 'system' : settings.mandatoryPromptRole;
+        const mandatoryRole = mapRoleSetting(mandatoryRoleSetting);
+        setExtensionPrompt(TV_PROMPT_KEY, '', mandatoryPosition, mandatoryDepth, false, mandatoryRole);
         return;
     }
 
     // Reset per-generation guards (only on first pass, not recursive)
     resetNotebookWriteGuard();
 
-    const settings = getSettings();
     let runtimeState = null;
 
     // Clean up orphaned tool_invocations at the tail of chat (caused by
@@ -1024,8 +1064,8 @@ async function onGenerationStarted(type, opts, dryRun) {
 // once per group member by waiting for the last MESSAGE_RECEIVED.
 let _sidecarWriterDebounceTimer = null;
 
-async function onMessageReceived(_messageId, type) {
-    console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${_messageId} type="${type}"`);
+async function onMessageReceived(messageId, type) {
+    console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${messageId} type="${type}"`);
     // Clear generation guards BEFORE the sidecar writer runs, so that lorebook
     // writes triggered by the writer do not get blocked by the generation guard.
     _generationInProgress = false;
@@ -1064,7 +1104,7 @@ async function onMessageReceived(_messageId, type) {
     }
 
     try {
-        await runSidecarWriter();
+        await runSidecarWriter(messageId);
     } catch (err) {
         console.error('[TunnelVision] Sidecar post-gen writer error:', err);
     }
@@ -1077,6 +1117,92 @@ async function onMessageReceived(_messageId, type) {
  * @param {Object} settings
  */
 const ST_DEFAULT_RECURSE_LIMIT = 5;
+
+/**
+ * Remove any lorebook entries that were created based on messages
+ * that have since been deleted or swiped.
+ */
+async function cleanInvalidSidecarMemories() {
+    const context = getContext();
+    const chat = context.chat;
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length === 0) return;
+
+    // Build a set of currently valid message IDs and fingerprints
+    const validMessages = new Set();
+    const validFingerprints = new Set();
+    for (const msg of chat) {
+        if (msg.mesId !== undefined) {
+            validMessages.add(String(msg.mesId));
+            const finger = msg.mes ? `${msg.mes.length}_${msg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
+            validFingerprints.add(`${msg.mesId}:${finger}`);
+        } else {
+            // Legacy chats: messages may not have mesId — use index + content hash
+            const finger = msg.mes ? `${msg.mes.length}_${msg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
+            if (finger !== '0') validFingerprints.add(finger);
+        }
+    }
+
+    for (const bookName of activeBooks) {
+        const bookData = await loadWorldInfo(bookName);
+        if (!bookData || !bookData.entries) continue;
+
+        let changed = false;
+        const entryKeys = Object.keys(bookData.entries);
+
+        for (const key of entryKeys) {
+            const entry = bookData.entries[key];
+            const comment = entry.comment || '';
+            const keys = entry.key || [];
+
+            let msgId, finger;
+
+            // 1. Check for new keyword-based tracker (!tv_tracker:msgId:hash)
+            const trackerKey = keys.find(k => String(k).startsWith('!tv_tracker:'));
+            if (trackerKey) {
+                const parts = trackerKey.split(':');
+                if (parts.length >= 3) {
+                    msgId = parts[1];
+                    finger = parts.slice(2).join(':');
+                }
+            } else {
+                // 2. Fallback for legacy tagged entries
+                const match = comment.match(/\[TV_SIDECAR:([^:]+):([^\]]+)\]/);
+                if (match) {
+                    msgId = match[1];
+                    finger = match[2];
+                }
+            }
+
+            if (msgId) {
+                const fullKey = `${msgId}:${finger}`;
+                const isMessageValid = msgId === 'untracked' || validMessages.has(msgId);
+                const isFingerprintValid = validFingerprints.has(fullKey) || validFingerprints.has(finger);
+
+                if (!isMessageValid || !isFingerprintValid) {
+                    console.log(`[TunnelVision] Auto-cleaning invalid memory: "${comment.substring(0, 40)}..." (UID ${entry.uid}) in "${bookName}"`);
+
+                    // Remove from tree
+                    const tree = getTree(bookName);
+                    if (tree) {
+                        removeEntryFromTree(tree.root, entry.uid);
+                        saveTree(bookName, tree);
+                    }
+
+                    // Delete from lorebook using ST's native API
+                    await deleteWorldInfoEntry(bookData, entry.uid, { silent: true });
+                    deleteWIOriginalDataValue(bookData, entry.uid);
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed) {
+            await saveWorldInfo(bookName, bookData, true);
+        }
+    }
+}
+
 function applyRecurseLimit(settings) {
     const limit = Number(settings.recurseLimit);
     if (!isFinite(limit) || limit < 1) {

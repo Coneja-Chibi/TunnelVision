@@ -768,20 +768,33 @@
                         <div class="tv-adv-section">
                             <div class="tv-adv-section-title">Sidecar LLM</div>
                             <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Optional: Select a connection profile for TV's LLM operations (tree building, summaries, chat ingest). TV will make direct API calls using the profile's provider, model, and endpoint with its own controlled samplers instead of your chat preset. Requires <b>allowKeysExposure: true</b> in ST's config.yaml. Leave empty to use ST's generateRaw with your current API settings.
+                                Direct API for TV's own LLM operations (tree building, summaries, ingest, retrieval). TV calls the endpoint you set below using its own key — no <code>allowKeysExposure</code> needed. Leave disabled to use ST's current API via generateRaw.
                             </div>
-                            <select id="tv_connection_profile" class="tv-select" style="margin-bottom: 6px;">
-                                <option value="">(Use current API settings)</option>
-                            </select>
+                            <label class="tv-toggle" style="margin-bottom: 6px;">
+                                <input id="tv_sidecar_enabled" type="checkbox" />
+                                <span class="tv-toggle-slider"></span>
+                                <span class="tv-toggle-label">Enable Sidecar LLM</span>
+                            </label>
+                            <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                                <input type="text" id="tv_sidecar_endpoint" class="tv-text-input" style="flex: 2;" placeholder="Endpoint (e.g. https://api.openai.com/v1)" />
+                                <select id="tv_sidecar_format" class="tv-select" style="flex: 1;">
+                                    <option value="openai">OpenAI-compatible</option>
+                                    <option value="anthropic">Anthropic</option>
+                                    <option value="google">Google</option>
+                                </select>
+                            </div>
+                            <input type="password" id="tv_sidecar_api_key" class="tv-text-input" style="margin-bottom: 6px;" placeholder="API key" autocomplete="off" />
+                            <input type="text" id="tv_sidecar_model" class="tv-text-input" style="margin-bottom: 6px;" placeholder="Model (e.g. gpt-4o-mini)" />
+                            <button id="tv_sidecar_test" class="menu_button" type="button" style="margin-bottom: 6px;">Test Connection</button>
                             <div id="tv_sidecar_sampler_fields" style="display: none;">
                                 <div style="display: flex; gap: 8px; align-items: center;">
                                     <div style="flex: 1;">
-                                        <label class="tv-label" for="tv_sidecar_temperature">Temperature: <span id="tv_sidecar_temp_val">0.2</span></label>
-                                        <input type="range" id="tv_sidecar_temperature" min="0" max="1" step="0.05" value="0.2" />
+                                        <label class="tv-label" for="tv_sidecar_temperature">Temperature: <span id="tv_sidecar_temp_val">0.3</span></label>
+                                        <input type="range" id="tv_sidecar_temperature" min="0" max="1" step="0.05" value="0.3" />
                                     </div>
                                     <div style="flex: 1;">
                                         <label class="tv-label" for="tv_sidecar_max_tokens">Max Tokens</label>
-                                        <input type="number" id="tv_sidecar_max_tokens" class="tv-number-input" min="256" max="32768" step="256" value="2048" />
+                                        <input type="number" id="tv_sidecar_max_tokens" class="tv-number-input" min="256" max="32768" step="256" value="1000" />
                                     </div>
                                 </div>
                                 <!-- Auto-Retrieval (pre-gen) -->
@@ -840,6 +853,29 @@
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div class="tv-adv-subsection" style="margin-top: 12px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 8px;">
+                                <div class="tv-adv-section-title">Embedding Sidecar</div>
+                                <div class="tv-help-text" style="margin-bottom: 6px;">
+                                    Optional separate endpoint for embeddings (vector dedup / similarity). API key may be empty for local servers.
+                                </div>
+                                <label class="tv-toggle" style="margin-bottom: 6px;">
+                                    <input id="tv_embedding_enabled" type="checkbox" />
+                                    <span class="tv-toggle-slider"></span>
+                                    <span class="tv-toggle-label">Enable Embedding Sidecar</span>
+                                </label>
+                                <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                                    <input type="text" id="tv_embedding_endpoint" class="tv-text-input" style="flex: 2;" placeholder="Endpoint (e.g. https://api.openai.com/v1)" />
+                                    <select id="tv_embedding_format" class="tv-select" style="flex: 1;">
+                                        <option value="openai">OpenAI-compatible</option>
+                                        <option value="google">Google</option>
+                                        <option value="gemini">Gemini</option>
+                                    </select>
+                                </div>
+                                <input type="password" id="tv_embedding_api_key" class="tv-text-input" style="margin-bottom: 6px;" placeholder="API key (optional)" autocomplete="off" />
+                                <input type="text" id="tv_embedding_model" class="tv-text-input" style="margin-bottom: 6px;" placeholder="Model (e.g. text-embedding-3-small)" />
+                                <button id="tv_embedding_test" class="menu_button" type="button">Test Connection</button>
                             </div>
                         </div>
                     </div>

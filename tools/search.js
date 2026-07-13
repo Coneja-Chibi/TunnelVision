@@ -19,6 +19,7 @@ import {
 } from '../tree-store.js';
 import { getReadableBooks } from '../tool-registry.js';
 import { getKeywordTriggeredUids } from '../index.js';
+import { getInjectedNodeIds } from '../sidecar-retrieval.js';
 
 // ─── Loop Detection ─────────────────────────────────────────────
 // Tracks node IDs called within the current generation turn.
@@ -385,6 +386,7 @@ function formatCollapsedNode(node, depth, isRoot = false, maxDepth = Infinity) {
  */
 async function resolveNodeEntries(nodeId, seenEntries = new Set()) {
     const results = [];
+    const seenPassages = new Set();
 
     // Document-level node: resolve all entries from that specific lorebook
     if (isDocNode(nodeId)) {
@@ -396,7 +398,7 @@ async function resolveNodeEntries(nodeId, seenEntries = new Set()) {
         const bookData = await loadWorldInfo(bookName);
         if (!bookData || !bookData.entries) return '';
         const uidMap = buildUidMap(bookData.entries);
-        pushResolvedEntries(results, seenEntries, bookName, uidMap, uids);
+        pushResolvedEntries(results, seenEntries, bookName, uidMap, uids, seenPassages);
         return results.join('\n\n');
     }
 
@@ -414,13 +416,28 @@ async function resolveNodeEntries(nodeId, seenEntries = new Set()) {
         if (!bookData || !bookData.entries) continue;
 
         const uidMap = buildUidMap(bookData.entries);
-        pushResolvedEntries(results, seenEntries, bookName, uidMap, uids);
+        pushResolvedEntries(results, seenEntries, bookName, uidMap, uids, seenPassages);
     }
 
     return results.join('\n\n');
 }
 
-function pushResolvedEntries(results, seenEntries, bookName, uidMap, uids) {
+function deduplicatePassages(content, seenPassages) {
+    if (!seenPassages) return content;
+    const passages = content.split(/(?<=[.!?])\s+(?=[A-Z"[])|(?:\n{2,})/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0);
+    const unique = [];
+    for (const passage of passages) {
+        const key = passage.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (key.length >= 40 && seenPassages.has(key)) continue;
+        if (key.length >= 40) seenPassages.add(key);
+        unique.push(passage);
+    }
+    return unique.join(' ').trim();
+}
+
+function pushResolvedEntries(results, seenEntries, bookName, uidMap, uids, seenPassages = null) {
     for (const uid of uids) {
         const entry = uidMap.get(uid);
         if (!entry?.content || entry.disable) continue;
@@ -431,7 +448,9 @@ function pushResolvedEntries(results, seenEntries, bookName, uidMap, uids) {
         const title = entry.comment || entry.key?.[0] || `Entry #${uid}`;
         const triggered = getKeywordTriggeredUids().has(Number(uid));
         const tag = triggered ? ' | ⚡ Already in context via keyword trigger' : '';
-        results.push(`[Lorebook: ${bookName} | UID: ${uid} | Title: ${title}${tag}]\n${entry.content}`);
+        const content = deduplicatePassages(entry.content, seenPassages);
+        if (!content) continue;
+        results.push(`[Lorebook: ${bookName} | UID: ${uid} | Title: ${title}${tag}]\n${content}`);
     }
 }
 
@@ -497,6 +516,7 @@ async function buildEntryManifest(nodeId) {
 async function resolveEntriesByUid(uids) {
     const results = [];
     const seen = new Set();
+    const seenPassages = new Set();
 
     for (const bookName of getReadableBooks()) {
         const bookData = await loadWorldInfo(bookName);
@@ -512,7 +532,9 @@ async function resolveEntriesByUid(uids) {
             if (seen.has(key)) continue;
             seen.add(key);
             const title = entry.comment || entry.key?.[0] || `Entry #${numUid}`;
-            results.push(`[Lorebook: ${bookName} | UID: ${numUid} | Title: ${title}]\n${entry.content}`);
+            const content = deduplicatePassages(entry.content, seenPassages);
+            if (!content) continue;
+            results.push(`[Lorebook: ${bookName} | UID: ${numUid} | Title: ${title}]\n${content}`);
         }
     }
 

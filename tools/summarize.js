@@ -81,10 +81,6 @@ function getSummarizedHideRange(messagesBack, overrideStart, overrideEnd) {
         const watermark = getWatermark();
         if (watermark < 0) {
             // Watermark has never been set (first-ever summary in this chat).
-            // Refusing to hide because the fallback range would cover the entire
-            // chat from message 1, which is almost always wrong. The watermark
-            // will be set after this summary completes (line below), so future
-            // summaries will have a safe range.
             console.log('[TunnelVision] Skipping auto-hide: no watermark set yet (first summary in this chat). Setting watermark to current position.');
             setWatermark(currentMsgId - 1);
             return null;
@@ -338,6 +334,7 @@ When you notice related events forming a pattern or storyline, group them into "
                     comment: `[Summary] ${args.title}`,
                     keys,
                     nodeId: targetNodeId,
+                    tv_tracker: args.tv_tracker,
                 });
                 markAutoSummaryComplete();
                 let response = `Summarized: "${args.title}" (UID ${result.uid}) → "${result.nodeLabel}" in "${lorebook}". Significance: ${significance}.`;

@@ -26,8 +26,6 @@ vi.mock('../tree-store.js', () => ({
     }),
     getBookDescription: vi.fn(() => ''),
     isTrackerTitle: vi.fn(title => /^\[tracker[^\]]*\]/i.test(String(title || '').trim())),
-    getConnectionProfileId: vi.fn(() => null),
-    findConnectionProfile: vi.fn(() => null),
 }));
 
 vi.mock('../tool-registry.js', () => ({

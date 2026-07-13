@@ -560,10 +560,15 @@ function renderAllItems() {
         return;
     }
 
-    // Sort: active items first (by recency), constant entries pushed to bottom
+    // Sort: newest first, constant entries pushed to bottom.
+    // Coerce `constant` to a boolean: entry items set `constant: false`, while
+    // tool items leave it `undefined`. Comparing the raw values (false !== undefined)
+    // made the comparator non-antisymmetric, so Array.sort produced arbitrary order
+    // (entries floated above newer tool items regardless of timestamp).
     const sorted = [...filtered].sort((a, b) => {
-        if (a.constant !== b.constant) return a.constant ? 1 : -1;
-        return 0; // preserve insertion order within each group
+        const ac = !!a.constant, bc = !!b.constant;
+        if (ac !== bc) return ac ? 1 : -1;
+        return (b.timestamp || 0) - (a.timestamp || 0);
     });
 
     panelBody.replaceChildren();
@@ -959,7 +964,7 @@ export function logSidecarWrite(opType, { lorebook = '', title = '', uid = null,
  * @param {number} [details.charCount] - Approximate character count injected
  * @param {string} [details.reasoning]
  */
-export function logSidecarRetrieval({ nodeIds = [], nodeLabels = [], charCount = 0, reasoning = '' } = {}) {
+export function logSidecarRetrieval({ nodeIds = [], nodeLabels = [], entries = [], charCount = 0, reasoning = '' } = {}) {
     const labels = nodeLabels.length > 0 ? nodeLabels : nodeIds;
     let summary;
     if (labels.length === 1) {
@@ -971,18 +976,33 @@ export function logSidecarRetrieval({ nodeIds = [], nodeLabels = [], charCount =
     }
 
     const modelLabel = getSidecarModelLabel();
-    const items = [{
+    const timestamp = Date.now();
+    const items = [];
+
+    // One Entry row per injected memory (parity with TunnelVision_Search),
+    // so retrieved nodes are individually browsable in the Entries tab.
+    for (const entry of entries) {
+        items.push(createEntryFeedItem({
+            source: 'tunnelvision',
+            lorebook: entry.lorebook || '',
+            uid: entry.uid ?? null,
+            title: entry.title || `UID ${entry.uid ?? '?'}`,
+            timestamp,
+        }));
+    }
+
+    items.push({
         id: nextId++,
         type: 'tool',
         icon: 'fa-satellite-dish',
         verb: 'Sidecar Retrieved',
         color: '#00b894',
         summary,
-        timestamp: Date.now(),
+        timestamp,
         isSidecar: true,
         sidecarModel: modelLabel,
         reasoning,
-    }];
+    });
 
     addFeedItems(items);
 }
@@ -1024,6 +1044,36 @@ export function logConditionalEvaluations(evaluations, conditionalEntries) {
     }
 
     addFeedItems(items);
+}
+
+/**
+ * Log a snapshot revert (message deletion / swipe) to the activity feed.
+ * One summary item per reverted message.
+ * @param {{ deletedCount?: number, restoredCount?: number, treeCount?: number, books?: string[] }} info
+ */
+export function logSnapshotRevert({ deletedCount = 0, restoredCount = 0, treeCount = 0, books = [] } = {}) {
+    if (deletedCount === 0 && restoredCount === 0 && treeCount === 0) return;
+
+    const parts = [];
+    if (deletedCount > 0) parts.push(`${deletedCount} created entr${deletedCount === 1 ? 'y' : 'ies'} removed`);
+    if (restoredCount > 0) parts.push(`${restoredCount} entr${restoredCount === 1 ? 'y' : 'ies'} restored`);
+    if (treeCount > 0) parts.push(`${treeCount} tree${treeCount === 1 ? '' : 's'} restored`);
+
+    const uniqueBooks = [...new Set((books || []).filter(Boolean))];
+    let suffix = '';
+    if (uniqueBooks.length === 1) suffix = ` in ${uniqueBooks[0]}`;
+    else if (uniqueBooks.length > 1) suffix = ` across ${uniqueBooks.length} books`;
+
+    addFeedItems([{
+        id: nextId++,
+        type: 'tool',
+        icon: 'fa-rotate-left',
+        verb: 'Reverted',
+        color: '#e17055',
+        summary: (parts.join(', ') || 'memory reverted') + suffix,
+        timestamp: Date.now(),
+        isSidecar: true,
+    }]);
 }
 
 // ── Entry / Retrieved Entry Helpers ──

@@ -21,9 +21,9 @@ import {
     saveTree,
     getAllEntryUids,
     getSettings,
-    findConnectionProfile,
+    consolidateSiblingNodes,
 } from './tree-store.js';
-import { applyBackgroundPromptAddendum } from './agent-utils.js';
+import { applyBackgroundPromptAddendum, trigramSimilarity } from './agent-utils.js';
 
 /**
  * Granularity presets control how aggressively the builder splits entries.
@@ -91,45 +91,15 @@ async function generateRaw(opts) {
 }
 
 /**
- * Switch to the configured TV connection profile (if any), run the callback,
- * then restore the original profile. Falls back gracefully if Connection Manager
- * isn't installed or the /profile command isn't available.
- * @param {() => Promise<T>} fn Async function to run with the profile active
+ * Run a callback against TV's LLM. If the sidecar is configured, the callback makes
+ * direct API calls; otherwise it runs against ST's current active API (generateRaw).
+ * No connection-profile switching — TV no longer owns an ST profile.
+ * @param {() => Promise<T>} fn
  * @returns {Promise<T>}
  * @template T
  */
-async function withConnectionProfile(fn) {
-    // Sidecar makes direct API calls — no need to switch ST profiles
-    if (isSidecarConfigured()) return fn();
-
-    const settings = getSettings();
-    const targetProfile = findConnectionProfile(settings.connectionProfile);
-    const targetProfileName = targetProfile?.name || settings.connectionProfile;
-    if (!targetProfileName) {
-        return fn();
-    }
-
-    const profileCmd = getContext()?.SlashCommandParser?.commands?.['profile'];
-    if (!profileCmd) {
-        console.warn('[TunnelVision] /profile command not available (Connection Manager not loaded). Using current API.');
-        return fn();
-    }
-
-    // Capture the current profile name to restore later
-    const originalProfile = await profileCmd.callback({}, '');
-
-    // Skip switching if already on the target profile
-    if (originalProfile === targetProfileName) {
-        return fn();
-    }
-
-    try {
-        console.log(`[TunnelVision] Switching to connection profile: "${targetProfileName}"`);
-        await profileCmd.callback({ await: 'true', timeout: '5000' }, targetProfileName);
-        return await fn();
-    } finally {
-        await profileCmd.callback({ await: 'true', timeout: '5000' }, originalProfile || '<None>');
-    }
+async function withSidecarOrCurrentApi(fn) {
+    return fn();
 }
 
 /**
@@ -244,11 +214,13 @@ export async function buildTreeFromMetadata(lorebookName, options = {}) {
  * @returns {Promise<import('./tree-store.js').TreeIndex>}
  */
 export async function buildTreeWithLLM(lorebookName, options = {}) {
-    return withConnectionProfile(() => _buildTreeWithLLM(lorebookName, options));
+    return withSidecarOrCurrentApi(() => _buildTreeWithLLM(lorebookName, options));
 }
 
 /** Default max concurrent LLM calls during build phases. */
 const BUILD_CONCURRENCY = 3;
+
+const NODE_LABEL_FUZZY_THRESHOLD = 0.65;
 
 /**
  * Run an array of async tasks with bounded concurrency.
@@ -314,7 +286,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     progress(`Categorizing chunk 1/${chunks.length}`, 0);
     detail_(`${activeEntries.length} entries across ${chunks.length} chunk(s)`);
     const allEntryManifest = chunks.length > 1
-        ? activeEntries.map(e => formatEntryForLLM(e, 'names')).join('\n  - ')
+        ? activeEntries.map(e => formatEntryForLLM(e, 'names', { includeUid: false })).join('\n  - ')
         : null;
     const firstPrompt = buildCategorizationPrompt(lorebookName, chunks[0], activeEntries.length, allEntryManifest);
     const firstResponse = await generateRaw({
@@ -324,7 +296,12 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     if (!firstResponse) throw new Error('LLM returned empty response for tree categorization.');
 
     const allUids = activeEntries.map(e => e.uid);
-    const tree = await parseLLMTreeResponse(lorebookName, firstResponse, allUids);
+    // For multi-chunk builds, only pass chunk 1's UIDs to the initial parse.
+    // parseLLMTreeResponse's fallback assigns unplaced UIDs to root — if allUids
+    // is passed here, entries from chunks 2+ are pre-assigned to root before those
+    // chunks are even processed, causing mergeLLMResponse to skip them as "already assigned".
+    const chunk1Uids = chunks.length > 1 ? chunks[0].map(e => e.uid) : allUids;
+    const tree = await parseLLMTreeResponse(lorebookName, firstResponse, chunk1Uids);
 
     // Subsequent chunks: run in parallel — each gets the same category snapshot
     if (chunks.length > 1) {
@@ -361,6 +338,32 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
         if (!assigned.has(uid)) addEntryToNode(tree.root, uid);
     }
 
+    // Re-categorize any entries that couldn't be placed by the main chunking pass
+    if (tree.root.entryUids.length > 0) {
+        progress('Re-categorizing uncategorized entries…', 62);
+        const rootUids = [...tree.root.entryUids];
+        const rootUidSet = new Set(rootUids);
+        const rootEntries = activeEntries.filter(e => rootUidSet.has(e.uid));
+        const existingCategories = extractCategoryLabels(tree.root);
+        if (existingCategories.length > 0) {
+            console.log(`[TunnelVision] Re-categorizing ${rootEntries.length} uncategorized entries against ${existingCategories.length} categories…`);
+            const retryPrompt = buildContinuationPrompt(lorebookName, rootEntries, existingCategories, activeEntries.length);
+            const retryResponse = await generateRaw({
+                prompt: retryPrompt,
+                systemPrompt: applyBackgroundPromptAddendum('You are a categorization assistant. Respond ONLY with valid JSON, no commentary.'),
+            });
+            if (retryResponse) {
+                tree.root.entryUids = []; // clear so mergeLLMResponse can place them
+                mergeLLMResponse(tree, retryResponse, allUids);
+                const reassigned = new Set(getAllEntryUids(tree.root));
+                for (const uid of rootUids) {
+                    if (!reassigned.has(uid)) addEntryToNode(tree.root, uid);
+                }
+                console.log(`[TunnelVision] Re-categorization: placed ${rootUids.length - tree.root.entryUids.length}/${rootUids.length} previously uncategorized entries.`);
+            }
+        }
+    }
+
     // Save intermediate tree so chunking work isn't lost if subdivision/summaries abort
     tree.lastBuilt = Date.now();
     saveTree(lorebookName, tree);
@@ -370,6 +373,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     progress('Subdividing large nodes…', 65);
     detail_(`Splitting categories with ${gran.maxEntries}+ entries (granularity: ${gran.label})`);
     await subdivideLargeNodes(tree.root, bookData, activeEntries.length);
+    consolidateSiblingNodes(tree.root);
     saveTree(lorebookName, tree);
 
     // PageIndex pattern: generate per-node summaries (parallel with batching)
@@ -430,9 +434,17 @@ function chunkEntries(entries, detail, charLimit) {
 function extractCategoryLabels(root) {
     const labels = [];
     for (const child of (root.children || [])) {
-        labels.push(child.label);
+        const count = getAllEntryUids(child).length;
+        const summary = child.summary ? ` — ${child.summary.split('\n')[0].slice(0, 80)}` : '';
+        labels.push(`${child.label} (${count} entries)${summary}`);
         for (const sub of (child.children || [])) {
-            labels.push(`${child.label} > ${sub.label}`);
+            const subCount = getAllEntryUids(sub).length;
+            const subSummary = sub.summary ? ` — ${sub.summary.split('\n')[0].slice(0, 60)}` : '';
+            labels.push(`  ${child.label} > ${sub.label} (${subCount} entries)${subSummary}`);
+            for (const grand of (sub.children || [])) {
+                const grandCount = getAllEntryUids(grand).length;
+                labels.push(`    ${child.label} > ${sub.label} > ${grand.label} (${grandCount} entries)`);
+            }
         }
     }
     return labels;
@@ -460,7 +472,7 @@ ${catList}
 Here are the NEW entries to categorize:
 ${entryList}
 
-IMPORTANT: Every entry UID must appear exactly once. Assign each entry to the BEST-FIT existing category. Only create a new category if an entry truly does not fit any existing one.${subCatHint} Do NOT leave entries uncategorized — every UID must be in a category.
+IMPORTANT: Every entry UID must appear exactly once. Strongly prefer existing categories — only create a new one if NO existing category is even a plausible fit. New category labels must follow the same naming style as existing ones (specific noun phrases, no "Other"/"Misc"/"General").${subCatHint} Do NOT leave entries uncategorized — every UID must be in a category.
 
 Respond with ONLY valid JSON in this exact format:
 {
@@ -483,6 +495,19 @@ Respond with ONLY valid JSON in this exact format:
  * @param {string} response
  * @param {number[]} validUids
  */
+function fuzzyFindNode(label, labelMap) {
+    if (labelMap.has(label)) return labelMap.get(label);
+    let best = null, bestScore = 0;
+    for (const [key, node] of labelMap) {
+        const score = trigramSimilarity(label, key);
+        if (score > bestScore && score >= NODE_LABEL_FUZZY_THRESHOLD) {
+            bestScore = score;
+            best = node;
+        }
+    }
+    return best;
+}
+
 function mergeLLMResponse(tree, response, validUids) {
     try {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -504,7 +529,7 @@ function mergeLLMResponse(tree, response, validUids) {
 
         for (const cat of parsed.categories) {
             const catLabel = (cat.label || 'Unnamed').toLowerCase();
-            const existingNode = labelMap.get(catLabel);
+            const existingNode = fuzzyFindNode(catLabel, labelMap);
             const targetNode = existingNode || createTreeNode(cat.label || 'Unnamed', cat.summary || '');
 
             if (Array.isArray(cat.entries)) {
@@ -521,7 +546,7 @@ function mergeLLMResponse(tree, response, validUids) {
             if (Array.isArray(cat.children)) {
                 for (const sub of cat.children) {
                     const subLabel = (sub.label || 'Unnamed').toLowerCase();
-                    const existingSub = labelMap.get(subLabel);
+                    const existingSub = fuzzyFindNode(subLabel, labelMap);
                     const subNode = existingSub || createTreeNode(sub.label || 'Unnamed', sub.summary || '');
                     if (Array.isArray(sub.entries)) {
                         for (const uid of sub.entries) {
@@ -557,7 +582,7 @@ function mergeLLMResponse(tree, response, validUids) {
  */
 export async function generateSummariesForTree(node, lorebookName, _isRoot = true) {
     if (_isRoot) {
-        return withConnectionProfile(() => _generateSummariesForTree(node, lorebookName, true, null));
+        return withSidecarOrCurrentApi(() => _generateSummariesForTree(node, lorebookName, true, null));
     }
     return _generateSummariesForTree(node, lorebookName, _isRoot, null);
 }
@@ -747,11 +772,8 @@ async function subdivideLargeNodes(node, bookData, totalEntryCount = 0, _depth =
             // When the node already has children (e.g. root with orphaned entries from
             // multi-chunk categorization), tell the LLM about existing categories so it
             // can assign entries to them rather than creating redundant new ones.
-            const existingChildren = node.children.length > 0
-                ? node.children.map(c => c.label)
-                : [];
-            const existingHint = existingChildren.length > 0
-                ? `\n\nExisting sub-categories in "${node.label}": ${existingChildren.join(', ')}. Assign entries to these when they fit, or create new sub-categories for entries that don't fit any existing one.`
+            const existingHint = node.children.length > 0
+                ? `\n\nExisting sub-categories in "${node.label}": ${node.children.map(c => `${c.label} (${c.entryUids.length} entries)`).join(', ')}. Assign entries to these when they fit, or create new sub-categories only for entries that genuinely do not fit any existing one.`
                 : '';
 
             try {
@@ -759,7 +781,7 @@ async function subdivideLargeNodes(node, bookData, totalEntryCount = 0, _depth =
                 const subCatCount = Math.min(6, Math.ceil(nodeEntries.length / gran.maxEntries));
                 const entryList = nodeEntries.map(e => `  ${formatEntryForLLM(e, detail)}`).join('\n');
                 const response = await generateRaw({
-                    prompt: `You have ${nodeEntries.length} lorebook entries in "${node.label}". Split into 2-${subCatCount} sub-categories. Every entry must be assigned.${existingHint}\n\nEntries:\n${entryList}\n\nRespond ONLY with JSON: { "subcategories": [{ "label": "Name", "entries": [uid1, uid2] }] }`,
+                    prompt: `You have ${nodeEntries.length} lorebook entries in the "${node.label}" category of a lorebook tree used for AI context retrieval. Split into 2–${subCatCount} focused sub-categories so an AI assistant can navigate to the right entries quickly.${existingHint}\n\nUse specific, descriptive noun phrases as sub-category labels. Avoid "Other", "Miscellaneous", or "General". Every entry must be assigned to exactly one sub-category.\n\nEntries:\n${entryList}\n\nRespond ONLY with JSON: { "subcategories": [{ "label": "Name", "entries": [uid1, uid2] }] }`,
                     systemPrompt: applyBackgroundPromptAddendum('You are a categorization assistant. Respond ONLY with valid JSON, no commentary.'),
                 });
                 if (response) {
@@ -777,8 +799,9 @@ async function subdivideLargeNodes(node, bookData, totalEntryCount = 0, _depth =
                             for (const sub of parsed.subcategories) {
                                 const subLabel = (sub.label || 'Unnamed').toLowerCase();
                                 // Merge into existing child if label matches
-                                const target = childMap.get(subLabel) || createTreeNode(sub.label || 'Unnamed', '');
-                                const isNew = !childMap.has(subLabel);
+                                const existingChild = fuzzyFindNode(subLabel, childMap);
+                                const target = existingChild || createTreeNode(sub.label || 'Unnamed', '');
+                                const isNew = !existingChild;
 
                                 if (Array.isArray(sub.entries)) {
                                     for (const uid of sub.entries) {
@@ -829,6 +852,8 @@ ${entryList}
 
 Create a JSON hierarchy that groups these entries into logical categories. Use ${gran.targetCategories} top-level categories, each with sub-categories where natural. Aim for no more than ${gran.maxEntries} entries per leaf node. Every entry UID listed above must appear exactly once. Do NOT leave entries uncategorized.
 
+The tree is navigated by an AI assistant during chat to retrieve relevant context. Use specific, descriptive noun phrases as labels (e.g. "Magic System", "Elena's Backstory", "Port Alara Geography"). Avoid generic labels like "Other", "Miscellaneous", or "General". Category summaries should describe what an AI would find inside, not just restate the label.
+
 Respond with ONLY valid JSON in this exact format:
 {
   "categories": [
@@ -871,7 +896,7 @@ async function parseLLMTreeResponse(lorebookName, response, entryUids) {
                     }
                 }
                 if (Array.isArray(cat.children) && cat.children.length > 0) buildNodes(cat.children, node);
-                parent.children.push(node);
+                if (node.entryUids.length > 0 || node.children.length > 0) parent.children.push(node);
             }
         }
 
@@ -903,7 +928,7 @@ async function parseLLMTreeResponse(lorebookName, response, entryUids) {
  * @returns {Promise<{created: number, errors: number}>}
  */
 export async function ingestChatMessages(lorebookName, options) {
-    return withConnectionProfile(() => _ingestChatMessages(lorebookName, options));
+    return withSidecarOrCurrentApi(() => _ingestChatMessages(lorebookName, options));
 }
 
 async function _ingestChatMessages(lorebookName, { from, to, progress, detail }) {
@@ -948,6 +973,21 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
 
     report(`Extracting facts from ${chunks.length} chunk(s)...`, 5);
 
+    // Load existing lorebook entries to prevent re-extraction and for trigram dedup
+    const existingBookData = await loadWorldInfo(lorebookName);
+    const existingTitles = [];
+    const dedupTexts = [];
+    if (existingBookData?.entries) {
+        for (const e of Object.values(existingBookData.entries)) {
+            if (e.disable) continue;
+            const title = (e.comment || '').trim();
+            if (title) existingTitles.push(title);
+            dedupTexts.push(`${e.comment || ''} ${e.content || ''}`.toLowerCase());
+        }
+    }
+    const shownExistingTitles = existingTitles.slice(0, 150);
+    const prevExtracted = []; // titles extracted from earlier chunks, passed to subsequent prompts
+
     let totalCreated = 0;
     let totalErrors = 0;
 
@@ -961,7 +1001,7 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
         let response;
         try {
             response = await generateRaw({
-                prompt: buildIngestPrompt(lorebookName, formatted),
+                prompt: buildIngestPrompt(lorebookName, formatted, shownExistingTitles, [...prevExtracted]),
                 systemPrompt: applyBackgroundPromptAddendum('You are a fact extraction assistant. Extract important facts, character details, relationships, events, and world information from roleplay chat logs. Respond ONLY with valid JSON, no commentary.'),
             });
         } catch (e) {
@@ -993,9 +1033,15 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
 
         if (!Array.isArray(entries)) continue;
 
-        // Create entries
+        // Create entries (with trigram dedup against existing and already-ingested entries)
         for (const extracted of entries) {
             if (!extracted.title || !extracted.content) continue;
+            const newText = `${extracted.title} ${extracted.content}`.toLowerCase();
+            const isDupe = dedupTexts.some(existing => trigramSimilarity(newText, existing) >= 0.62);
+            if (isDupe) {
+                console.log(`[TunnelVision] Ingest: skipping duplicate "${extracted.title}"`);
+                continue;
+            }
             try {
                 await createEntry(lorebookName, {
                     content: String(extracted.content).trim(),
@@ -1003,6 +1049,8 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
                     keys: Array.isArray(extracted.keys) ? extracted.keys : [],
                     nodeId: null,
                 });
+                dedupTexts.push(newText);
+                prevExtracted.push(String(extracted.title).trim());
                 totalCreated++;
             } catch (e) {
                 console.warn(`[TunnelVision] Failed to create entry "${extracted.title}":`, e);
@@ -1016,10 +1064,26 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
     return { created: totalCreated, errors: totalErrors };
 }
 
-function buildIngestPrompt(lorebookName, chatText) {
-    return `Extract important facts from this roleplay chat log for the lorebook "${lorebookName}".
+function buildIngestPrompt(lorebookName, chatText, existingTitles = [], prevExtracted = []) {
+    const existingSection = existingTitles.length > 0
+        ? `\n[Already in lorebook — do NOT re-extract these]\n${existingTitles.map(t => `- ${t}`).join('\n')}\n`
+        : '';
+    const prevSection = prevExtracted.length > 0
+        ? `\n[Already extracted from earlier chunks — do NOT duplicate these]\n${prevExtracted.map(t => `- ${t}`).join('\n')}\n`
+        : '';
 
+    return `Extract important facts from this roleplay chat log for the lorebook "${lorebookName}".
+${existingSection}${prevSection}
 For each distinct fact, character detail, relationship, event, or world detail, create an entry.
+
+Rules:
+- Extract ONLY concrete facts, not dialogue or opinions
+- Write content in third person, factual style
+- Each entry should be a single, distinct piece of information
+- Include character names in keys for cross-referencing
+- Skip trivial or generic information
+- Merge related facts into single entries when they belong together
+- If a subject already appears in the "Already in lorebook" list above, write content as an addendum — state only the new specific detail, do NOT restate who they are or repeat their general description
 
 Chat log:
 ${chatText}
@@ -1028,18 +1092,12 @@ Respond with ONLY a JSON array:
 [
   {
     "title": "Short descriptive title",
-    "content": "The factual information written in third person. Include names, places, details.",
-    "keys": ["keyword1", "keyword2"]
+    "content": "The factual information written in third person.",
+    "keys": ["keyword1", "keyword2"],
+    "significance": "low" | "medium" | "high",
+    "when": "approximate story time if discernible, otherwise omit this field"
   }
-]
-
-Rules:
-- Extract ONLY concrete facts, not dialogue or opinions
-- Write content in third person, factual style
-- Each entry should be a single, distinct piece of information
-- Include character names in keys for cross-referencing
-- Skip trivial or generic information
-- Merge related facts into single entries when they belong together`;
+]`;
 }
 
 function findBalancedJsonEnd(text, start, opener, closer) {

@@ -28,9 +28,6 @@ import {
     isTrackerTitle,
     setTrackerUid,
     syncTrackerUidsForLorebook,
-    getConnectionProfileId,
-    setConnectionProfileId,
-    listConnectionProfiles,
     getBookPermission,
     setBookPermission,
     getBookInjectionMode,
@@ -38,6 +35,7 @@ import {
     SETTING_DEFAULTS,
 } from './tree-store.js';
 import { buildTreeFromMetadata, buildTreeWithLLM, generateSummariesForTree, ingestChatMessages } from './tree-builder.js';
+import { testSidecarConnectivity, testEmbeddingConnectivity } from './llm-sidecar.js';
 import { registerTools, unregisterTools, getDefaultToolDescriptions, stripDynamicContent } from './tool-registry.js';
 import { runDiagnostics } from './diagnostics.js';
 import { applyRecurseLimit } from './index.js';
@@ -47,6 +45,7 @@ import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
 
 
 let currentLorebook = null;
+let activeEditorRefresh = null;
 
 function selectCurrentLorebook(bookName) {
     currentLorebook = bookName || null;
@@ -54,16 +53,13 @@ function selectCurrentLorebook(bookName) {
 }
 
 function syncSelectedLorebook() {
-    if (currentLorebook && world_names?.includes(currentLorebook)) {
+    // Chat-stored selection is authoritative — do not keep a stale currentLorebook
+    // across a chat switch even if the old book still exists in world_names.
+    const stored = getSelectedLorebook();
+    if (stored && world_names?.includes(stored)) {
+        currentLorebook = stored;
         return;
     }
-
-    const preferredLorebook = getSelectedLorebook();
-    if (preferredLorebook && world_names?.includes(preferredLorebook)) {
-        currentLorebook = preferredLorebook;
-        return;
-    }
-
     currentLorebook = null;
 }
 
@@ -190,8 +186,20 @@ export function bindUIEvents() {
     // Multi-book mode
     $('input[name="tv_multi_book_mode"]').on('change', onMultiBookModeChange);
 
-    // Sidecar LLM (connection profile + sampler overrides)
-    $('#tv_connection_profile').on('change', onConnectionProfileChange);
+    // Sidecar LLM direct-config fields
+    $('#tv_sidecar_enabled').on('change', onSidecarProfileChange);
+    $('#tv_sidecar_endpoint').on('input', onSidecarProfileChange);
+    $('#tv_sidecar_format').on('change', onSidecarProfileChange);
+    $('#tv_sidecar_api_key').on('input', onSidecarProfileChange);
+    $('#tv_sidecar_model').on('input', onSidecarProfileChange);
+    $('#tv_sidecar_test').on('click', onTestSidecarConnection);
+    // Embedding sidecar fields
+    $('#tv_embedding_enabled').on('change', onEmbeddingProfileChange);
+    $('#tv_embedding_endpoint').on('input', onEmbeddingProfileChange);
+    $('#tv_embedding_format').on('change', onEmbeddingProfileChange);
+    $('#tv_embedding_api_key').on('input', onEmbeddingProfileChange);
+    $('#tv_embedding_model').on('input', onEmbeddingProfileChange);
+    $('#tv_embedding_test').on('click', onTestEmbeddingConnection);
     $('#tv_sidecar_temperature').on('input', onSidecarTemperatureChange);
     $('#tv_sidecar_max_tokens').on('input', onSidecarMaxTokensChange);
 
@@ -238,6 +246,11 @@ export function refreshUI() {
     const settings = getSettings();
     const globalEnabled = settings.globalEnabled !== false;
     syncSelectedLorebook();
+
+    // Trigger active editor refresh if open
+    if (activeEditorRefresh) {
+        activeEditorRefresh();
+    }
 
     $('#tv_global_enabled').prop('checked', globalEnabled);
     $('#tv_main_controls').toggle(globalEnabled);
@@ -340,8 +353,8 @@ export function refreshUI() {
     // Sync multi-book mode
     $(`input[name="tv_multi_book_mode"][value="${settings.multiBookMode || 'unified'}"]`).prop('checked', true);
 
-    // Sync connection profile + sidecar sampler controls
-    populateConnectionProfiles();
+    // Sync sidecar/embedding profiles + sampler controls
+    populateSidecarProfiles();
 
     populateLorebookDropdown();
     $('#tv_lorebook_controls').toggle(!!currentLorebook);
@@ -943,23 +956,69 @@ function onMultiBookModeChange() {
 
 // ─── Sidecar LLM (Connection Profile + Sampler Overrides) ───────
 
-function onConnectionProfileChange() {
-    setConnectionProfileId($(this).val() || null);
-    // Show/hide sampler controls when a profile is selected
-    $('#tv_sidecar_sampler_fields').toggle(!!$(this).val());
+function readSidecarProfileFromUi(settings) {
+    const p = settings.sidecarProfile || (settings.sidecarProfile = {});
+    p.enabled = $('#tv_sidecar_enabled').prop('checked');
+    p.endpoint = $('#tv_sidecar_endpoint').val() || '';
+    p.format = $('#tv_sidecar_format').val() || 'openai';
+    p.apiKey = $('#tv_sidecar_api_key').val() || '';
+    p.model = $('#tv_sidecar_model').val() || '';
+    if (typeof p.maxTokens !== 'number') p.maxTokens = 1000;
+    if (typeof p.temperature !== 'number') p.temperature = 0.3;
+    return p;
+}
+
+function onSidecarProfileChange() {
+    const settings = getSettings();
+    readSidecarProfileFromUi(settings);
+    $('#tv_sidecar_sampler_fields').toggle(!!settings.sidecarProfile.enabled);
+    saveSettingsDebounced();
+}
+
+function onEmbeddingProfileChange() {
+    const settings = getSettings();
+    const p = settings.embeddingProfile || (settings.embeddingProfile = {});
+    p.enabled = $('#tv_embedding_enabled').prop('checked');
+    p.endpoint = $('#tv_embedding_endpoint').val() || '';
+    p.format = $('#tv_embedding_format').val() || 'openai';
+    p.apiKey = $('#tv_embedding_api_key').val() || '';
+    p.model = $('#tv_embedding_model').val() || '';
+    saveSettingsDebounced();
+}
+
+async function onTestSidecarConnection() {
+    const $btn = $('#tv_sidecar_test');
+    $btn.prop('disabled', true).text('Testing…');
+    try {
+        const result = await testSidecarConnectivity();
+        (result.ok ? toastr.success : toastr.error)(result.message, 'Sidecar LLM');
+    } finally {
+        $btn.prop('disabled', false).text('Test Connection');
+    }
+}
+
+async function onTestEmbeddingConnection() {
+    const $btn = $('#tv_embedding_test');
+    $btn.prop('disabled', true).text('Testing…');
+    try {
+        const result = await testEmbeddingConnectivity();
+        (result.ok ? toastr.success : toastr.error)(result.message, 'Embedding Sidecar');
+    } finally {
+        $btn.prop('disabled', false).text('Test Connection');
+    }
 }
 
 function onSidecarTemperatureChange() {
     const val = parseFloat($(this).val());
     const settings = getSettings();
-    settings.sidecarTemperature = val;
+    (settings.sidecarProfile || (settings.sidecarProfile = {})).temperature = val;
     $('#tv_sidecar_temp_val').text(val.toFixed(2));
     saveSettingsDebounced();
 }
 
 function onSidecarMaxTokensChange() {
     const settings = getSettings();
-    settings.sidecarMaxTokens = Number($(this).val()) || 2048;
+    (settings.sidecarProfile || (settings.sidecarProfile = {})).maxTokens = Number($(this).val()) || 1000;
     saveSettingsDebounced();
 }
 
@@ -1022,26 +1081,25 @@ function onBookInjectionModeChange() {
     registerTools();
 }
 
-function populateConnectionProfiles() {
-    const $select = $('#tv_connection_profile');
-    const currentVal = getConnectionProfileId() || '';
-
-    // Keep the first option (default)
-    $select.find('option:not(:first)').remove();
-
-    for (const profile of listConnectionProfiles().sort((a, b) => (a.name || '').localeCompare(b.name || ''))) {
-        if (!profile?.id || !profile?.name) continue;
-        $select.append($('<option></option>').val(profile.id).text(profile.name));
-    }
-
-    $select.val(currentVal);
-
-    // Sync sampler controls
+function populateSidecarProfiles() {
     const settings = getSettings();
-    $('#tv_sidecar_temperature').val(settings.sidecarTemperature ?? 0.2);
-    $('#tv_sidecar_temp_val').text((settings.sidecarTemperature ?? 0.2).toFixed(2));
-    $('#tv_sidecar_max_tokens').val(settings.sidecarMaxTokens || 2048);
-    $('#tv_sidecar_sampler_fields').toggle(!!currentVal);
+    const sc = settings.sidecarProfile || {};
+    $('#tv_sidecar_enabled').prop('checked', !!sc.enabled);
+    $('#tv_sidecar_endpoint').val(sc.endpoint || '');
+    $('#tv_sidecar_format').val(sc.format || 'openai');
+    $('#tv_sidecar_api_key').val(sc.apiKey || '');
+    $('#tv_sidecar_model').val(sc.model || '');
+    $('#tv_sidecar_temperature').val(sc.temperature ?? 0.3);
+    $('#tv_sidecar_temp_val').text((sc.temperature ?? 0.3).toFixed(2));
+    $('#tv_sidecar_max_tokens').val(sc.maxTokens || 1000);
+    $('#tv_sidecar_sampler_fields').toggle(!!sc.enabled);
+
+    const emb = settings.embeddingProfile || {};
+    $('#tv_embedding_enabled').prop('checked', !!emb.enabled);
+    $('#tv_embedding_endpoint').val(emb.endpoint || '');
+    $('#tv_embedding_format').val(emb.format || 'openai');
+    $('#tv_embedding_api_key').val(emb.apiKey || '');
+    $('#tv_embedding_model').val(emb.model || '');
 
     // Sync auto-retrieval controls
     const autoRetrieval = settings.sidecarAutoRetrieval === true;
@@ -1138,6 +1196,24 @@ async function onOpenTreeEditor() {
         renderTreeNodes();
         renderMainPanel();
     }
+
+    // Automatic refresh logic
+    activeEditorRefresh = async () => {
+        const freshBookData = await loadWorldInfo(bookName);
+        entryLookup = buildEntryLookup(freshBookData);
+        // Sync tree in case it was modified externally
+        const freshTree = getTree(bookName);
+        if (freshTree) {
+            // Update the local tree reference's root
+            tree.root = freshTree.root;
+            // If the selected node no longer exists in the new tree, fall back to root
+            if (selectedNode && selectedNode.id !== '__unassigned__' && !findNodeById(tree.root, selectedNode.id)) {
+                selectedNode = tree.root;
+            }
+        }
+        renderTreeNodes();
+        renderMainPanel();
+    };
 
     function isRootNode(node) {
         return !!node && node.id === tree.root.id;
@@ -1441,6 +1517,10 @@ async function onOpenTreeEditor() {
                 const wasTracked = isTrackerUid(bookName, uid);
                 entry.disable = !entry.disable;
                 await saveWorldInfo(bookName, bookData, true);
+                
+                // Update local lookup to ensure countActiveEntries stays correct
+                entryLookup[uid] = entry;
+
                 if (entry.disable) {
                     setTrackerUid(bookName, uid, false);
                 } else if (wasTracked || isTrackerTitle(entry.comment)) {
@@ -1760,12 +1840,16 @@ async function onOpenTreeEditor() {
     });
 
     // Show popup (blocks until user closes it)
-    await callGenericPopup($popup, POPUP_TYPE.DISPLAY, '', {
-        large: true,
-        wide: true,
-        allowVerticalScrolling: true,
-        allowHorizontalScrolling: false,
-    });
+    try {
+        await callGenericPopup($popup, POPUP_TYPE.DISPLAY, '', {
+            large: true,
+            wide: true,
+            allowVerticalScrolling: true,
+            allowHorizontalScrolling: false,
+        });
+    } finally {
+        activeEditorRefresh = null;
+    }
 
     // When popup closes, refresh sidebar UI
     loadLorebookUI(bookName);

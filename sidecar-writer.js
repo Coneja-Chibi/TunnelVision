@@ -16,9 +16,10 @@
  */
 
 import { getContext } from '../../../st-context.js';
-import { loadWorldInfo } from '../../../world-info.js';
+import { loadWorldInfo, saveWorldInfo, deleteWorldInfoEntry, deleteWIOriginalDataValue } from '../../../world-info.js';
 import {
     getTree,
+    saveTree,
     findNodeById,
     getAllEntryUids,
     getSettings,
@@ -31,8 +32,346 @@ import { getDefinition as getSummarizeDef } from './tools/summarize.js';
 import { getDefinition as getForgetDef } from './tools/forget.js';
 import { getDefinition as getReorganizeDef } from './tools/reorganize.js';
 import { getDefinition as getMergeSplitDef } from './tools/merge-split.js';
-import { logSidecarWrite } from './activity-feed.js';
-import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
+import { logSidecarWrite, logSnapshotRevert } from './activity-feed.js';
+import { saveSettingsDebounced } from '../../../../script.js';
+import { applyBackgroundPromptAddendum, buildLanguageDirective, trigramSimilarity } from './agent-utils.js';
+
+const SUMMARY_DEDUP_THRESHOLD = 0.50;
+
+// ─── Turn Snapshots (for undos) ──────────────────────────────────
+
+/**
+ * Stores lorebook entry snapshots before they are modified by the sidecar.
+ * Allows reverting updates if a message is deleted or swiped.
+ * Keyed by "msgId:hash".
+ * @type {Map<string, Object>}
+ */
+const turnSnapshots = new Map();
+
+/** chat_metadata key under which snapshots persist across reloads. */
+const SNAPSHOTS_METADATA_KEY = 'tunnelvision_snapshots';
+/** Max snapshots retained (20; bounds chat-file bloat, constant regardless of chat length). */
+const MAX_SNAPSHOTS = 20;
+
+/**
+ * Persist the in-memory snapshot map into chat_metadata so revert-on-deletion
+ * survives a page reload. Stored as a plain object keyed by "msgId:hash".
+ */
+function persistSnapshots() {
+    try {
+        const context = getContext();
+        if (!context.chatMetadata) return;
+        context.chatMetadata[SNAPSHOTS_METADATA_KEY] = Object.fromEntries(turnSnapshots);
+        context.saveMetadataDebounced?.();
+    } catch { /* no active chat */ }
+}
+
+/**
+ * Rehydrate the snapshot map from chat_metadata. Call on init and on
+ * CHAT_CHANGED so reverts work after a reload or chat switch.
+ */
+export function hydrateSnapshots() {
+    try {
+        turnSnapshots.clear();
+        const data = getContext().chatMetadata?.[SNAPSHOTS_METADATA_KEY];
+        if (data && typeof data === 'object') {
+            for (const [key, snap] of Object.entries(data)) {
+                turnSnapshots.set(key, snap);
+            }
+        }
+    } catch { /* no active chat */ }
+}
+
+/**
+ * Take a snapshot of the state of entries about to be modified.
+ * @param {string} snapshotKey
+ * @param {WriteOp[]} ops
+ */
+async function takeSnapshots(snapshotKey, ops) {
+    const snapshots = {
+        createdUids: [], // UIDs of new entries created this turn (to be deleted)
+        modifiedEntries: {}, // Original state of entries updated/merged (to be restored)
+        treeState: {}, // Copy of tree root for each book (to be restored)
+    };
+
+    for (const op of ops) {
+        if (!op.lorebook) continue;
+        const bookData = await loadWorldInfo(op.lorebook);
+        if (!bookData?.entries) continue;
+
+        if (op.type === 'update' || op.type === 'merge' || op.type === 'forget' || op.type === 'split') {
+            const uids = op.type === 'merge' ? [op.keep_uid, op.remove_uid] : [op.uid];
+            for (const uid of uids) {
+                if (uid === undefined) continue;
+                const entry = findEntryByUid(bookData.entries, uid);
+                if (entry) {
+                    const key = `${op.lorebook}:${uid}`;
+                    if (!snapshots.modifiedEntries[key]) {
+                        snapshots.modifiedEntries[key] = JSON.parse(JSON.stringify(entry));
+                    }
+                }
+            }
+        }
+        
+        // Always snapshot the tree state if we might change it
+        if (!snapshots.treeState[op.lorebook]) {
+            const tree = getTree(op.lorebook);
+            if (tree?.root) {
+                snapshots.treeState[op.lorebook] = JSON.parse(JSON.stringify(tree.root));
+            }
+        }
+    }
+
+    turnSnapshots.set(snapshotKey, snapshots);
+
+    // Prune old snapshots (keep last MAX_SNAPSHOTS)
+    while (turnSnapshots.size > MAX_SNAPSHOTS) {
+        const firstKey = turnSnapshots.keys().next().value;
+        turnSnapshots.delete(firstKey);
+    }
+
+    persistSnapshots();
+}
+
+/**
+ * Exported for index.js to use during cleanup.
+ * Reverts any modifications made by the sidecar for a specific message.
+ */
+export async function revertMessageSnapshots(msgId, msgHash) {
+    const key = `${msgId}:${msgHash}`;
+    const snapshots = turnSnapshots.get(key);
+    if (!snapshots) return false;
+
+    console.log(`[TunnelVision] Reverting sidecar modifications for message ${msgId}...`);
+
+    let deletedCount = 0;
+    let restoredCount = 0;
+    const touchedBooks = new Set();
+
+    // 1. Delete created entries
+    for (const item of snapshots.createdUids) {
+        const { bookName, uid } = item;
+        const bookData = await loadWorldInfo(bookName);
+        if (bookData?.entries) {
+            const entry = bookData.entries[uid];
+            if (entry) {
+                console.debug(`   - Deleting created entry: "${entry.comment}" (UID ${uid})`);
+                await deleteWorldInfoEntry(bookData, uid, { silent: true });
+                deleteWIOriginalDataValue(bookData, uid);
+
+                await saveWorldInfo(bookName, bookData, true);
+
+                // Force UI update so it vanishes from the native Lorebook instantly
+                if (typeof window.renderWorldInfoList === 'function') window.renderWorldInfoList();
+                if (typeof window.renderWorldInfo === 'function') window.renderWorldInfo();
+
+                deletedCount++;
+                touchedBooks.add(bookName);
+            }
+        }
+    }
+
+    // 2. Restore modified entries
+    const booksToSave = new Set();
+    for (const [idKey, originalEntry] of Object.entries(snapshots.modifiedEntries)) {
+        const [bookName, uid] = idKey.split(':');
+        const bookData = await loadWorldInfo(bookName);
+        if (bookData?.entries) {
+            const entryKey = Object.keys(bookData.entries).find(k => bookData.entries[k].uid === Number(uid));
+            if (entryKey) {
+                console.debug(`   - Restoring entry: UID ${uid} in "${bookName}"`);
+                bookData.entries[entryKey] = originalEntry;
+                
+                // Deep restore to SillyTavern's underlying array
+                if (bookData.originalData && Array.isArray(bookData.originalData.entries)) {
+                    const origIdx = bookData.originalData.entries.findIndex(x => x.uid === Number(uid));
+                    if (origIdx >= 0) {
+                        bookData.originalData.entries[origIdx] = originalEntry;
+                    }
+                }
+                
+                booksToSave.add(bookName);
+                restoredCount++;
+                touchedBooks.add(bookName);
+            }
+        }
+    }
+    for (const bookName of booksToSave) {
+        const bookData = await loadWorldInfo(bookName);
+        await saveWorldInfo(bookName, bookData, true);
+        if (typeof window.renderWorldInfoList === 'function') window.renderWorldInfoList();
+    }
+
+    // 3. Restore tree states
+    let treeCount = 0;
+    for (const [bookName, originalRoot] of Object.entries(snapshots.treeState)) {
+        const tree = getTree(bookName);
+        if (tree) {
+            console.debug(`   - Restoring tree structure for "${bookName}"`);
+            tree.root = originalRoot;
+            saveTree(bookName, tree);
+            treeCount++;
+            touchedBooks.add(bookName);
+        }
+    }
+
+    turnSnapshots.delete(key);
+    persistSnapshots();
+
+    // Surface the revert in the activity feed — one summary item per message
+    logSnapshotRevert({ deletedCount, restoredCount, treeCount, books: [...touchedBooks] });
+
+    return true;
+}
+
+/**
+ * Scan all stored snapshots and revert any that belong to messages that are
+ * no longer in the chat (or have been modified via swiping).
+ * This completely decouples the undo logic from ST event arguments.
+ */
+export async function revertInvalidSnapshots() {
+    const context = getContext();
+    const chat = context.chat;
+    if (!chat || !turnSnapshots.size) return;
+
+    // Build set of currently valid msgId:msgHash combinations
+    const validHashes = new Set();
+    for (const msg of chat) {
+        const hash = msg.mes ? `${msg.mes.length}_${msg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
+        if (msg.mesId !== undefined) {
+            validHashes.add(`${msg.mesId}:${hash}`);
+        } else if (hash !== '0') {
+            // Legacy chats: use content-hash-only key for fingerprint matching
+            validHashes.add(hash);
+        }
+    }
+
+    // Revert any snapshot whose key is no longer valid
+    for (const key of turnSnapshots.keys()) {
+        const parts = key.split(':');
+        const msgId = parts[0];
+        const valid = validHashes.has(key);
+        if (!valid) {
+            const msgHash = parts.slice(1).join(':');
+            // Also check: the snapshot's content hash might match a current message's hash
+            // (e.g., when msgId is 'untracked', compare by hash alone)
+            const hashOnly = msgHash;
+            const hashMatches = msgId === 'untracked' && validHashes.has(hashOnly);
+            if (!hashMatches) {
+                console.log(`[TunnelVision] Reverting sidecar snapshot for message ${msgId}`);
+                await revertMessageSnapshots(msgId, msgHash);
+            }
+        }
+    }
+}
+
+// ─── Recent Operations Buffer ────────────────────────────────────
+
+/**
+ * Tracks recent sidecar operations to avoid redundant writes across turns.
+ * Keyed by chatId.
+ * @type {Map<string, Array<{type: string, summary: string, turn: number}>>}
+ */
+const recentOpsBuffer = new Map();
+const MAX_BUFFERED_OPS = 10;
+
+/**
+ * Add an operation to the recent buffer.
+ * @param {string} chatId
+ * @param {string} type
+ * @param {string} summary
+ */
+function bufferOperation(chatId, type, summary) {
+    if (!chatId) return;
+    if (!recentOpsBuffer.has(chatId)) {
+        recentOpsBuffer.set(chatId, []);
+    }
+    const buffer = recentOpsBuffer.get(chatId);
+    buffer.unshift({ type, summary, turn: getContext().chat.length });
+    if (buffer.length > MAX_BUFFERED_OPS) {
+        buffer.pop();
+    }
+}
+
+/**
+ * Format recent operations for the sidecar prompt.
+ * @param {string} chatId
+ * @returns {string}
+ */
+function formatRecentOperations(chatId) {
+    if (!chatId || !recentOpsBuffer.has(chatId)) return '';
+    const buffer = recentOpsBuffer.get(chatId);
+    if (buffer.length === 0) return '';
+
+    let text = '\nRECENT SIDECAR OPERATIONS (already performed):\n';
+    for (const op of buffer) {
+        text += `- Turn ${op.turn} [${op.type}]: ${op.summary}\n`;
+    }
+    return text;
+}
+
+// ─── Summary Dedup ───────────────────────────────────────────────
+
+/**
+ * Load title+body text from all existing [Summary] entries across the given books.
+ * Returns objects so the dedup loop can convert near-duplicates to updates.
+ * @param {string[]} bookNames
+ * @returns {Promise<Array<{text: string, uid: number, lorebook: string}>>}
+ */
+async function loadSummaryTexts(bookNames) {
+    const entries = [];
+    for (const bookName of bookNames) {
+        const bookData = await loadWorldInfo(bookName);
+        if (!bookData?.entries) continue;
+        for (const e of Object.values(bookData.entries)) {
+            if (e.disable) continue;
+            if (!(e.comment || '').startsWith('[Summary]')) continue;
+            const title = (e.comment || '').replace(/^\[Summary\]\s*/, '').trim();
+            const rawContent = e.content || '';
+            const bodyStart = rawContent.indexOf('\n\n');
+            const body = bodyStart >= 0 ? rawContent.slice(bodyStart + 2) : rawContent;
+            entries.push({ text: `${title} ${body}`.toLowerCase(), uid: e.uid, lorebook: bookName });
+        }
+    }
+    return entries;
+}
+
+/**
+ * Format a summarize op's content in the same structure used by tools/summarize.js.
+ * Used when converting a duplicate summarize op into an update op.
+ * @param {Object} op
+ * @returns {string}
+ */
+function formatSummaryContent(op) {
+    const significance = op.significance || 'moderate';
+    const participants = Array.isArray(op.participants) && op.participants.length > 0
+        ? op.participants.join(', ')
+        : '(unspecified)';
+    return `[Scene Summary — ${significance}]\nParticipants: ${participants}\n\n${(op.summary || '').trim()}`;
+}
+
+/**
+ * Load stripped titles of all existing [Summary] entries, most recent first (by UID).
+ * Used to populate the EXISTING SUMMARIES section in the writer prompt so the LLM
+ * sees the full list even when the tree overview truncates the Summaries node.
+ * @param {string[]} bookNames
+ * @returns {Promise<string[]>}
+ */
+async function loadSummaryTitles(bookNames) {
+    const items = [];
+    for (const bookName of bookNames) {
+        const bookData = await loadWorldInfo(bookName);
+        if (!bookData?.entries) continue;
+        for (const e of Object.values(bookData.entries)) {
+            if (e.disable) continue;
+            if (!(e.comment || '').startsWith('[Summary]')) continue;
+            const title = (e.comment || '').replace(/^\[Summary\]\s*/, '').trim();
+            if (title) items.push({ uid: e.uid ?? 0, title });
+        }
+    }
+    items.sort((a, b) => b.uid - a.uid);
+    return items.slice(0, 50).map(i => i.title);
+}
 
 // ─── Tree Overview (shared format with sidecar-retrieval.js) ─────
 
@@ -182,7 +521,7 @@ Rules:
 - "remember" entries are NEW facts/events not already in the lorebook
 - "update" entries modify EXISTING entries (you must reference the UID)
 - "merge" consolidates two EXISTING entries that overlap — specify keep_uid (entry to keep) and remove_uid (entry to absorb)
-- "summarize" creates a scene/event summary for significant narrative beats (filed under a Summaries category)
+- "summarize" creates a permanent narrative record — use ONLY for: first meetings of important characters, arc-ending events, major revelations, character deaths or departures, turning points that definitively change the story direction. Do NOT use for routine dialogue, incremental roleplay, or content already covered by a recent Summaries entry.
 - "forget" disables entries that are no longer relevant (character died, fact proven false, info outdated)
 - "reorganize" moves entries between tree nodes or creates new categories for better organization
 - "split" divides one entry that covers multiple topics into two focused entries
@@ -216,7 +555,8 @@ CRITICAL — Updates must be surgical:
 CRITICAL — Housekeeping:
 - Use "forget" sparingly — only when information is definitively wrong or permanently irrelevant
 - Use "reorganize" when entries are clearly in the wrong category
-- Use "summarize" for significant scenes or narrative beats that should be preserved as events
+- Use "summarize" sparingly — 0 per turn is the norm. Never create a summary when an existing Summaries entry (listed above under EXISTING SUMMARY ENTRIES) already covers the same scene or session. When in doubt, skip it.
+- You can only see recent messages. NEVER use language like "first meeting", "first encounter", "for the first time", or "initial" — you cannot know if this is genuinely a first occurrence. Use neutral, factual language (e.g. "A meeting between X and Y" not "First meeting between X and Y").
 - Do NOT over-organize — only reorganize when there's a clear structural problem
 
 Response format:
@@ -251,12 +591,16 @@ Return ONLY the JSON object, no explanation.`;
  * Build the sidecar writer prompt.
  * @param {string} treeOverview
  * @param {string} recentChat
+ * @param {string} [recentOps]
  * @returns {string}
  */
-function buildWriterPrompt(treeOverview, recentChat) {
+function buildWriterPrompt(treeOverview, recentChat, recentOps = '', summaryTitles = []) {
     const writableBooks = getBookListWithDescriptions({ writableOnly: true });
+    const summarySection = summaryTitles.length > 0
+        ? `\nEXISTING SUMMARY ENTRIES (already recorded — do NOT create duplicates):\n${summaryTitles.map(t => `- ${t}`).join('\n')}\n`
+        : '';
     return `CURRENT LOREBOOK STATE:
-${treeOverview}
+${treeOverview}${summarySection}${recentOps}
 
 WRITABLE LOREBOOKS:
 ${writableBooks}
@@ -423,12 +767,22 @@ function parseWriteOps(response) {
  * Execute parsed write operations via tool action functions.
  * @param {WriteOp[]} ops
  * @param {string} [reasoning]
+ * @param {string|number} [messageId]
  * @returns {Promise<{succeeded: number, failed: number, results: string[]}>}
  */
-async function executeWriteOps(ops, reasoning = '') {
+async function executeWriteOps(ops, reasoning = '', messageId = null) {
     const results = [];
     let succeeded = 0;
     let failed = 0;
+
+    // Generate snapshot key for this turn
+    const lastMsg = getContext().chat[getContext().chat.length - 1];
+    const msgId = messageId ?? lastMsg?.mesId ?? 'untracked';
+    const msgHash = lastMsg?.mes ? `${lastMsg.mes.length}_${lastMsg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
+    const snapshotKey = `${msgId}:${msgHash}`;
+
+    // Take snapshots before modifying anything
+    await takeSnapshots(snapshotKey, ops);
 
     // Lazily get tool definitions (they rebuild each call to pick up current book list)
     const rememberAction = getRememberDef().action;
@@ -464,6 +818,21 @@ async function executeWriteOps(ops, reasoning = '') {
             }
 
             let result;
+            const context = getContext();
+            const lastMsg = context.chat[context.chat.length - 1];
+            
+            // Resolve message ID reliably
+            let msgId = messageId;
+            if (msgId === null || msgId === undefined) {
+                msgId = lastMsg?.mesId;
+            }
+            if (msgId === null || msgId === undefined) {
+                msgId = 'untracked';
+            }
+
+            const msgHash = lastMsg?.mes ? `${lastMsg.mes.length}_${lastMsg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
+            const tv_tracker = `!tv_tracker:${msgId}:${msgHash}`;
+
             if (op.type === 'remember') {
                 result = await rememberAction({
                     lorebook: op.lorebook,
@@ -471,6 +840,7 @@ async function executeWriteOps(ops, reasoning = '') {
                     content: op.content,
                     keys: op.keys,
                     node_id: op.node_id,
+                    tv_tracker,
                 });
             } else if (op.type === 'update') {
                 result = await updateAction({
@@ -495,6 +865,7 @@ async function executeWriteOps(ops, reasoning = '') {
                     summary: op.summary,
                     participants: op.participants,
                     significance: op.significance,
+                    tv_tracker,
                 });
             } else if (op.type === 'forget') {
                 result = await forgetAction({
@@ -536,25 +907,42 @@ async function executeWriteOps(ops, reasoning = '') {
             } else {
                 succeeded++;
                 results.push(`OK [${op.type}]: ${result}`);
+
+                // If this was a creation, record the UID for cleanup/undo
+                if (op.type === 'remember' || op.type === 'summarize') {
+                    const uidMatch = String(result).match(/\(UID (\d+)\)/);
+                    if (uidMatch) {
+                        const uid = Number(uidMatch[1]);
+                        const snapshots = turnSnapshots.get(snapshotKey);
+                        if (snapshots) {
+                            snapshots.createdUids.push({ bookName: op.lorebook, uid });
+                        }
+                    }
+                }
+
+                const opSummary = op.type === 'remember'
+                    ? `"${(op.title || '').substring(0, 50)}"`
+                    : op.type === 'merge'
+                    ? `UID ${op.keep_uid ?? '?'} ← UID ${op.remove_uid ?? '?'}${op.title ? ` "${op.title.substring(0, 40)}"` : ''}`
+                    : op.type === 'summarize'
+                    ? `"${(op.title || '').substring(0, 50)}"`
+                    : op.type === 'forget'
+                    ? `UID ${op.uid ?? '?'}: ${(op.reason || '').substring(0, 40)}`
+                    : op.type === 'reorganize'
+                    ? `${op.action || '?'}${op.uid ? ` UID ${op.uid}` : ''}${op.title ? ` "${op.title.substring(0, 30)}"` : ''}`
+                    : op.type === 'split'
+                    ? `UID ${op.uid ?? '?'} → "${(op.new_title || '').substring(0, 40)}"`
+                    : `UID ${op.uid ?? '?'}${op.title ? ` "${op.title.substring(0, 40)}"` : ''}`;
+
+                bufferOperation(getContext().chatId, op.type, opSummary);
+
                 logSidecarWrite(op.type, {
                     lorebook: op.lorebook,
                     title: op.title,
                     uid: op.uid,
                     keep_uid: op.keep_uid,
                     remove_uid: op.remove_uid,
-                    summary: op.type === 'remember'
-                        ? `"${(op.title || '').substring(0, 50)}"`
-                        : op.type === 'merge'
-                        ? `UID ${op.keep_uid ?? '?'} ← UID ${op.remove_uid ?? '?'}${op.title ? ` "${op.title.substring(0, 40)}"` : ''}`
-                        : op.type === 'summarize'
-                        ? `"${(op.title || '').substring(0, 50)}"`
-                        : op.type === 'forget'
-                        ? `UID ${op.uid ?? '?'}: ${(op.reason || '').substring(0, 40)}`
-                        : op.type === 'reorganize'
-                        ? `${op.action || '?'}${op.uid ? ` UID ${op.uid}` : ''}${op.title ? ` "${op.title.substring(0, 30)}"` : ''}`
-                        : op.type === 'split'
-                        ? `UID ${op.uid ?? '?'} → "${(op.new_title || '').substring(0, 40)}"`
-                        : `UID ${op.uid ?? '?'}${op.title ? ` "${op.title.substring(0, 40)}"` : ''}`,
+                    summary: opSummary,
                     reasoning,
                 });
             }
@@ -563,6 +951,11 @@ async function executeWriteOps(ops, reasoning = '') {
             results.push(`ERROR [${op.type}]: ${err.message}`);
         }
     }
+
+    // Re-persist: createdUids were appended to the snapshot during this loop,
+    // after takeSnapshots' initial persist. Without this, created entries
+    // wouldn't be deleted on a revert after a reload.
+    persistSnapshots();
 
     return { succeeded, failed, results };
 }
@@ -573,9 +966,10 @@ async function executeWriteOps(ops, reasoning = '') {
  * Run sidecar post-generation writer.
  * Called after MESSAGE_RECEIVED in index.js.
  *
+ * @param {string|number} [messageId]
  * @returns {Promise<void>}
  */
-export async function runSidecarWriter() {
+export async function runSidecarWriter(messageId = null) {
     const settings = getSettings();
 
     // Guard: must be enabled and sidecar must be configured
@@ -607,9 +1001,12 @@ export async function runSidecarWriter() {
         return;
     }
 
+    const recentOps = formatRecentOperations(getContext().chatId);
+    const summaryTitles = await loadSummaryTitles(activeBooks);
+
     try {
         // Ask sidecar what to write
-        const prompt = buildWriterPrompt(treeOverview, recentChat);
+        const prompt = buildWriterPrompt(treeOverview, recentChat, recentOps, summaryTitles);
         const langDirective = buildLanguageDirective();
         const response = await sidecarGenerate({
             prompt,
@@ -631,12 +1028,59 @@ export async function runSidecarWriter() {
         const maxOps = settings.sidecarWriterMaxOps ?? 5;
         const capped = ops.slice(0, maxOps);
 
+        // Dedup summarize ops — skip if near-identical to an existing summary entry
+        let summaryTexts = null;
+        const dedupedOps = [];
+        for (const op of capped) {
+            if (op.type === 'summarize') {
+                if (!summaryTexts) {
+                    summaryTexts = await loadSummaryTexts(activeBooks);
+                }
+                const newText = `${op.title || ''} ${op.summary || ''}`.toLowerCase();
+                const isDupe = summaryTexts.some(e => trigramSimilarity(newText, e.text) >= SUMMARY_DEDUP_THRESHOLD);
+                if (isDupe) {
+                    // Find the best-matching existing summary and update it instead of creating a new one
+                    const bestMatch = summaryTexts.reduce(
+                        (best, e) => {
+                            const score = trigramSimilarity(newText, e.text);
+                            return score > best.score ? { score, entry: e } : best;
+                        },
+                        { score: 0, entry: null },
+                    ).entry;
+
+                    if (bestMatch?.uid != null) {
+                        console.log(`[TunnelVision] Sidecar writer: updating existing summary UID ${bestMatch.uid} instead of creating duplicate "${op.title}"`);
+                        dedupedOps.push({
+                            type: 'update',
+                            lorebook: bestMatch.lorebook,
+                            uid: bestMatch.uid,
+                            content: formatSummaryContent(op),
+                            title: op.title ? `[Summary] ${op.title}` : undefined,
+                        });
+                    } else {
+                        console.log(`[TunnelVision] Sidecar writer: skipping duplicate summary "${op.title}" (no UID to update)`);
+                    }
+                    continue;
+                }
+                summaryTexts.push({ text: newText, uid: null, lorebook: op.lorebook });
+            }
+            dedupedOps.push(op);
+        }
+        if (dedupedOps.length === 0) {
+            console.log('[TunnelVision] Sidecar post-gen writer: all ops filtered by dedup');
+            return;
+        }
+
         // Execute writes
-        const { succeeded, failed, results } = await executeWriteOps(capped, reasoning);
+        const { succeeded, failed, results } = await executeWriteOps(dedupedOps, reasoning, messageId);
+
+        // Explicitly refresh UI after all modifications are complete
+        const { refreshUI } = await import('./ui-controller.js');
+        refreshUI();
 
         const _writerModel = getSidecarModelLabel() || 'unknown';
         console.log(
-            `[TunnelVision] Sidecar post-gen writer [${_writerModel}]: ${succeeded} succeeded, ${failed} failed out of ${capped.length} operations`,
+            `[TunnelVision] Sidecar post-gen writer [${_writerModel}]: ${succeeded} succeeded, ${failed} failed out of ${dedupedOps.length} operations`,
         );
         for (const r of results) {
             console.debug(`  ${r}`);
@@ -644,7 +1088,7 @@ export async function runSidecarWriter() {
 
         console.groupCollapsed(`[TunnelVision] Sidecar writer details (${_writerModel})`);
         if (reasoning) console.log('Reasoning:', reasoning);
-        for (const op of capped) {
+        for (const op of dedupedOps) {
             if (op.type === 'remember') {
                 console.log(`📝 Remember: "${op.title}" → ${op.lorebook || '(auto)'}`);
                 console.log(`   Content: ${(op.content || '').substring(0, 200)}${(op.content || '').length > 200 ? '...' : ''}`);
