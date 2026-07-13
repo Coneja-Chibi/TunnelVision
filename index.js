@@ -212,6 +212,9 @@ async function init() {
 }
 
 async function onChatChanged() {
+    // Auto-enable pattern-matched lorebooks FIRST so the migration below sees them
+    // in getActiveTunnelVisionBooks() (autoDetect mutates the active-book set).
+    autoDetectLorebooks();
     // Rehydrate sidecar snapshots from this chat's metadata so revert-on-deletion
     // survives a page reload / chat switch.
     hydrateSnapshots();
@@ -220,7 +223,7 @@ async function onChatChanged() {
     migrateSelectedLorebook(getActiveTunnelVisionBooks());
     // Catch slash command deletions (like /cut) which might not emit MESSAGE_DELETED
     await cleanInvalidSidecarMemories();
-    // autoDetectLorebooks + refreshUI + registerTools
+    // refreshUI + guarded registerTools (autoDetect re-run inside is idempotent)
     await refreshRuntimeState('chat changed');
 }
 
