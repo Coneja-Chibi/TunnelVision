@@ -24,6 +24,7 @@ import {
     consolidateSiblingNodes,
 } from './tree-store.js';
 import { applyBackgroundPromptAddendum, trigramSimilarity } from './agent-utils.js';
+import { SECRET_AUTHORING_INSTRUCTION } from './shared-utils.js';
 
 /**
  * Granularity presets control how aggressively the builder splits entries.
@@ -1084,6 +1085,7 @@ Rules:
 - Skip trivial or generic information
 - Merge related facts into single entries when they belong together
 - If a subject already appears in the "Already in lorebook" list above, write content as an addendum — state only the new specific detail, do NOT restate who they are or repeat their general description
+-${SECRET_AUTHORING_INSTRUCTION}
 
 Chat log:
 ${chatText}
