@@ -493,3 +493,27 @@ describe('formatShortDateTime', () => {
         expect(morningStr).not.toBe(eveningStr);
     });
 });
+
+import {
+    SECRET_TAG_RE,
+    SECRET_GUARD_LINE,
+    SECRET_AUTHORING_INSTRUCTION,
+} from '../shared-utils.js';
+
+describe('secret tag', () => {
+    it('matches a tagged entry regardless of case and suffix', () => {
+        expect(SECRET_TAG_RE.test('[SECRET — Elena is unaware] She is the heir.')).toBe(true);
+        expect(SECRET_TAG_RE.test('[secret] hidden')).toBe(true);
+        expect(SECRET_TAG_RE.test('[SECRET: king] plot')).toBe(true);
+    });
+
+    it('does not match the plain word secret in prose', () => {
+        expect(SECRET_TAG_RE.test('She kept the secret well.')).toBe(false);
+        expect(SECRET_TAG_RE.test('[SECRETARY] role note')).toBe(false);
+    });
+
+    it('guard line and authoring instruction reference the tag', () => {
+        expect(SECRET_GUARD_LINE).toContain('[SECRET');
+        expect(SECRET_AUTHORING_INSTRUCTION).toContain('[SECRET');
+    });
+});
