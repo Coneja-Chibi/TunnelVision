@@ -47,6 +47,8 @@ import {
   isSummaryEntry,
   isTrackerEntry,
   hashString,
+  SECRET_TAG_RE,
+  SECRET_GUARD_LINE,
 } from "./shared-utils.js";
 import {
   HOT_RECENCY_MS,
@@ -1497,11 +1499,11 @@ export function buildSmartContextPrompt() {
   // 1B: Record injections for cooldown
   recordInjections(selectedUids);
 
-  return [
-    `[TunnelVision Smart Context — ${selected.length} relevant entries auto-retrieved based on current scene. This is supplemental memory; the AI can search for more with TunnelVision_Search if needed.]`,
-    "",
-    selected.join("\n\n---\n\n"),
-  ].join("\n");
+  const header = `[TunnelVision Smart Context — ${selected.length} relevant entries auto-retrieved based on current scene. This is supplemental memory; the AI can search for more with TunnelVision_Search if needed.]`;
+  const hasSecret = selected.some((t) => SECRET_TAG_RE.test(t));
+  const parts = hasSecret ? [SECRET_GUARD_LINE, ""] : [];
+  parts.push(header, "", selected.join("\n\n---\n\n"));
+  return parts.join("\n");
 }
 
 /**
