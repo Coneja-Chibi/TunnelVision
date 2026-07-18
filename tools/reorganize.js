@@ -76,7 +76,9 @@ ${bookDesc}`,
                         return 'Move requires both "uid" and "target_node_id".';
                     }
                     try {
-                        const result = await moveEntry(lorebook, Number(args.uid), args.target_node_id);
+                        const result = await moveEntry(lorebook, Number(args.uid), args.target_node_id, {
+                            _backgroundSource: args._backgroundSource,
+                        });
                         return `Moved entry UID ${result.uid}: "${result.fromLabel}" → "${result.toLabel}".`;
                     } catch (e) {
                         console.error('[TunnelVision] Move failed:', e);

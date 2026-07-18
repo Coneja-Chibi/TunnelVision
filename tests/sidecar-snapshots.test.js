@@ -3,6 +3,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // Host context + heavy local deps mocked so we can exercise snapshot
 // persistence/hydration in isolation.
 vi.mock('../../../st-context.js', () => ({ getContext: vi.fn() }));
+vi.mock('../../../world-info.js', () => ({
+    loadWorldInfo: vi.fn(),
+    saveWorldInfo: vi.fn(),
+    deleteWorldInfoEntry: vi.fn(),
+    deleteWIOriginalDataValue: vi.fn(),
+}));
 vi.mock('../tree-store.js', () => ({
     getTree: vi.fn(() => null),
     saveTree: vi.fn(),
@@ -45,8 +51,9 @@ vi.mock('../agent-utils.js', () => ({
 }));
 
 import { getContext } from '../../../st-context.js';
+import { loadWorldInfo } from '../../../world-info.js';
 import { logSnapshotRevert } from '../activity-feed.js';
-import { hydrateSnapshots, revertMessageSnapshots } from '../sidecar-writer.js';
+import { excludeStaticWriteOps, hydrateSnapshots, revertMessageSnapshots } from '../sidecar-writer.js';
 
 const SNAP_KEY = 'tunnelvision_snapshots';
 
@@ -94,5 +101,37 @@ describe('sidecar snapshot persistence', () => {
 
         expect(result).toBe(false);
         expect(logSnapshotRevert).not.toHaveBeenCalled();
+    });
+});
+
+describe('sidecar static-entry protection', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('filters every destructive operation targeting a static entry before tool actions run', async () => {
+        loadWorldInfo.mockResolvedValue({
+            entries: {
+                static: { uid: 7, comment: 'Canon', constant: true, content: 'Do not rewrite.' },
+                mutable: { uid: 8, comment: 'Notes', constant: false, content: 'Can evolve.' },
+            },
+        });
+
+        const { allowed, skipped } = await excludeStaticWriteOps([
+            { type: 'update', lorebook: 'Book', uid: 7 },
+            { type: 'merge', lorebook: 'Book', keep_uid: 8, remove_uid: 7 },
+            { type: 'split', lorebook: 'Book', uid: 7 },
+            { type: 'forget', lorebook: 'Book', uid: 7 },
+            { type: 'reorganize', lorebook: 'Book', action: 'move', uid: 7 },
+            { type: 'update', lorebook: 'Book', uid: 8 },
+            { type: 'remember', lorebook: 'Book', title: 'New', content: 'Allowed.' },
+        ]);
+
+        expect(allowed).toEqual([
+            { type: 'update', lorebook: 'Book', uid: 8 },
+            { type: 'remember', lorebook: 'Book', title: 'New', content: 'Allowed.' },
+        ]);
+        expect(skipped).toHaveLength(5);
+        expect(skipped.every(message => message.includes('static entry "Canon"'))).toBe(true);
     });
 });

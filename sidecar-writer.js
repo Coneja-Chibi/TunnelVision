@@ -35,6 +35,7 @@ import { getDefinition as getMergeSplitDef } from './tools/merge-split.js';
 import { logSidecarWrite, logSnapshotRevert } from './activity-feed.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective, trigramSimilarity } from './agent-utils.js';
+import { isStaticEntry } from './entry-protection.js';
 
 const SUMMARY_DEDUP_THRESHOLD = 0.50;
 
@@ -435,7 +436,8 @@ function formatWriterNode(node, depth, isRoot, entries) {
             if (entry && !entry.disable) {
                 const title = entry.comment || entry.key?.[0] || `Entry #${uid}`;
                 const snippet = (entry.content || '').substring(0, 150).replace(/\n/g, ' ');
-                text += `${indent}  - UID ${uid}: "${title}"`;
+                const staticLabel = isStaticEntry(entry) ? ' [STATIC — reference only]' : '';
+                text += `${indent}  - UID ${uid}: "${title}"${staticLabel}`;
                 if (snippet) text += ` — ${snippet}${(entry.content || '').length > 150 ? '...' : ''}`;
                 text += '\n';
             }
@@ -525,6 +527,7 @@ Rules:
 - "forget" disables entries that are no longer relevant (character died, fact proven false, info outdated)
 - "reorganize" moves entries between tree nodes or creates new categories for better organization
 - "split" divides one entry that covers multiple topics into two focused entries
+- Entries marked [STATIC — reference only] are user-authored reference material. Never update, merge, split, forget, or move them.
 - Only create entries for significant, persistent information — not ephemeral dialogue
 - You are seeing conversation HISTORY only (the AI's latest response is excluded). Record facts the USER has established or confirmed, not speculative/fictional content
 - Focus on: character development, relationship changes, plot events, world-building facts, status changes
@@ -761,6 +764,64 @@ function parseWriteOps(response) {
     }
 }
 
+/**
+ * Return the existing entries a write operation would mutate. Creation-only
+ * operations intentionally have no targets and remain allowed.
+ * @param {WriteOp} op
+ * @returns {number[]}
+ */
+function getMutationTargetUids(op) {
+    switch (op.type) {
+        case 'merge': return [op.keep_uid, op.remove_uid];
+        case 'update':
+        case 'forget':
+        case 'split': return [op.uid];
+        case 'reorganize': return op.action === 'move' ? [op.uid] : [];
+        default: return [];
+    }
+}
+
+/**
+ * Defence in depth for the sidecar writer: do not pass operations that target
+ * static/constant entries to tool actions, even if the model ignores prompt
+ * instructions or an entry was omitted from the truncated tree overview.
+ * @param {WriteOp[]} ops
+ * @returns {Promise<{allowed: WriteOp[], skipped: string[]}>}
+ */
+export async function excludeStaticWriteOps(ops) {
+    const books = new Map();
+    const allowed = [];
+    const skipped = [];
+
+    for (const op of ops) {
+        const targetUids = getMutationTargetUids(op).filter(Number.isFinite);
+        if (targetUids.length === 0 || !op.lorebook) {
+            allowed.push(op);
+            continue;
+        }
+
+        if (!books.has(op.lorebook)) {
+            books.set(op.lorebook, await loadWorldInfo(op.lorebook));
+        }
+        const entries = books.get(op.lorebook)?.entries || {};
+        const staticEntry = targetUids
+            .map((uid) => findEntryByUid(entries, uid))
+            .find((entry) => isStaticEntry(entry));
+
+        if (staticEntry) {
+            const title = staticEntry.comment || `UID ${staticEntry.uid}`;
+            const message = `SKIP [${op.type}]: static entry "${title}" (UID ${staticEntry.uid}) is protected.`;
+            console.warn(`[TunnelVision] Sidecar writer: ${message}`);
+            skipped.push(message);
+            continue;
+        }
+
+        allowed.push(op);
+    }
+
+    return { allowed, skipped };
+}
+
 // ─── Execute Write Operations ────────────────────────────────────
 
 /**
@@ -781,8 +842,16 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
     const msgHash = lastMsg?.mes ? `${lastMsg.mes.length}_${lastMsg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
     const snapshotKey = `${msgId}:${msgHash}`;
 
-    // Take snapshots before modifying anything
-    await takeSnapshots(snapshotKey, ops);
+    // Never snapshot or invoke actions for static entries: they are protected
+    // from all autonomous sidecar mutations.
+    const { allowed: safeOps, skipped } = await excludeStaticWriteOps(ops);
+    results.push(...skipped);
+    if (safeOps.length === 0) {
+        return { succeeded, failed, skipped: skipped.length, results };
+    }
+
+    // Take snapshots before modifying anything.
+    await takeSnapshots(snapshotKey, safeOps);
 
     // Lazily get tool definitions (they rebuild each call to pick up current book list)
     const rememberAction = getRememberDef().action;
@@ -803,7 +872,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
         reorganize: REORGANIZE_NAME,
     };
 
-    for (const op of ops) {
+    for (const op of safeOps) {
         try {
             // Check confirmation if the user has it enabled for this tool type
             const toolName = OP_TO_TOOL[op.type];
@@ -841,6 +910,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     keys: op.keys,
                     node_id: op.node_id,
                     tv_tracker,
+                    _backgroundSource: 'sidecar',
                 });
             } else if (op.type === 'update') {
                 result = await updateAction({
@@ -848,6 +918,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     uid: op.uid,
                     content: op.content,
                     title: op.title,
+                    _backgroundSource: 'sidecar',
                 });
             } else if (op.type === 'merge') {
                 result = await mergeSplitAction({
@@ -857,6 +928,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     remove_uid: op.remove_uid,
                     merged_content: op.content || undefined,
                     merged_title: op.title || undefined,
+                    _backgroundSource: 'sidecar',
                 });
             } else if (op.type === 'summarize') {
                 result = await summarizeAction({
@@ -866,12 +938,14 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     participants: op.participants,
                     significance: op.significance,
                     tv_tracker,
+                    _backgroundSource: 'sidecar',
                 });
             } else if (op.type === 'forget') {
                 result = await forgetAction({
                     lorebook: op.lorebook,
                     uid: op.uid,
                     reason: op.reason,
+                    _backgroundSource: 'sidecar',
                 });
             } else if (op.type === 'reorganize') {
                 result = await reorganizeAction({
@@ -880,6 +954,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     uid: op.uid,
                     target_node_id: op.target_node_id,
                     label: op.title,
+                    _backgroundSource: 'sidecar',
                 });
             } else if (op.type === 'split') {
                 result = await mergeSplitAction({
@@ -891,6 +966,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     new_content: op.new_content,
                     new_title: op.new_title,
                     new_keys: op.new_keys,
+                    _backgroundSource: 'sidecar',
                 });
             }
 

@@ -44,6 +44,8 @@ import {
     persistWorldInfo,
     buildUidMap,
     withEntryTransaction,
+    updateEntry,
+    mergeEntries,
 } from '../entry-manager.js';
 
 describe('entry manager cache and transaction invariants', () => {
@@ -169,6 +171,45 @@ describe('entry manager cache and transaction invariants', () => {
             throw new Error('no snapshots');
         })).rejects.toThrow('no snapshots');
 
+        expect(saveWorldInfo).not.toHaveBeenCalled();
+    });
+});
+
+describe('background static-entry guard', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        invalidateWorldInfoCache();
+    });
+
+    it('rejects background updates to static entries before saving', async () => {
+        const bookData = {
+            entries: { canon: { uid: 7, comment: 'Canon', content: 'Fixed fact', constant: true } },
+        };
+        loadWorldInfo.mockResolvedValue(bookData);
+
+        await expect(updateEntry('Book A', 7, {
+            content: 'Overwritten',
+            _backgroundSource: 'sidecar',
+        })).rejects.toThrow('static entry');
+
+        expect(bookData.entries.canon.content).toBe('Fixed fact');
+        expect(saveWorldInfo).not.toHaveBeenCalled();
+    });
+
+    it('rejects background merges when either target is static', async () => {
+        const bookData = {
+            entries: {
+                canon: { uid: 7, comment: 'Canon', content: 'Fixed fact', constant: true, key: [] },
+                notes: { uid: 8, comment: 'Notes', content: 'Mutable note', constant: false, key: [] },
+            },
+        };
+        loadWorldInfo.mockResolvedValue(bookData);
+
+        await expect(mergeEntries('Book A', 8, 7, {
+            _backgroundSource: 'lifecycle',
+        })).rejects.toThrow('static entry');
+
+        expect(bookData.entries.canon.disable).toBeUndefined();
         expect(saveWorldInfo).not.toHaveBeenCalled();
     });
 });

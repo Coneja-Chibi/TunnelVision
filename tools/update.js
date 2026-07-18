@@ -77,6 +77,7 @@ ${bookDesc}`,
                 if (args.content) updates.content = args.content;
                 if (args.title) updates.comment = args.title;
                 if (args.keys) updates.keys = args.keys;
+                if (args._backgroundSource) updates._backgroundSource = args._backgroundSource;
 
                 const result = await updateEntry(lorebook, Number(args.uid), updates);
                 return `Updated entry "${result.comment}" (UID ${result.uid}): changed ${result.updated.join(', ')}.`;

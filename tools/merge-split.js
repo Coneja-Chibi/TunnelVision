@@ -117,6 +117,7 @@ ${bookDesc}`,
                                 mergedContent: args.merged_content || null,
                                 mergedTitle: args.merged_title || null,
                                 hardDelete: false,
+                                _backgroundSource: args._backgroundSource,
                             },
                         );
                         return `Merged entries: kept "${result.comment}" (UID ${result.uid}), absorbed "${result.removedComment}" (UID ${result.removedUid}, now disabled).`;
@@ -149,6 +150,7 @@ ${bookDesc}`,
                                 newContent: args.new_content,
                                 newTitle: args.new_title,
                                 newKeys: args.new_keys || [],
+                                _backgroundSource: args._backgroundSource,
                             },
                         );
                         return `Split entry: original "${result.originalTitle}" (UID ${result.originalUid}) updated, new "${result.newTitle}" (UID ${result.newUid}) created in "${result.nodeLabel}".`;

@@ -28,6 +28,7 @@ import {
     isTrackerUid,
     setTrackerUid,
 } from './tree-store.js';
+import { isStaticEntry } from './entry-protection.js';
 
 // ─── World Info Data Cache ───────────────────────────────────────
 // Avoids repeated async loadWorldInfo calls in hot paths like scoring.
@@ -62,6 +63,19 @@ export function getCachedWorldInfoSync(bookName) {
  */
 export function invalidateWorldInfoCache(bookName) {
     _wiCache.delete(bookName);
+}
+
+/**
+ * Reject background mutations of static user-authored entries. Direct, explicit
+ * tool calls remain available; this guard applies only to autonomous writers.
+ * @param {Object} entry
+ * @param {string|undefined} source
+ */
+function assertBackgroundEntryMutable(entry, source) {
+    if (source && isStaticEntry(entry)) {
+        const title = entry.comment || `Entry #${entry.uid ?? '?'}`;
+        throw new Error(`"${title}" is a static entry and cannot be changed by ${source}.`);
+    }
 }
 
 /**
@@ -178,6 +192,11 @@ export async function updateEntry(bookName, uid, updates) {
         throw new Error(`Entry UID ${uid} not found in lorebook "${bookName}".`);
     }
 
+    assertBackgroundEntryMutable(entry, updates._backgroundSource);
+    if (updates._expectedContent !== undefined && entry.content !== updates._expectedContent) {
+        throw new Error(`Entry UID ${uid} changed since this background operation was prepared; refusing to overwrite it.`);
+    }
+
     const changed = [];
 
     if (updates.content !== undefined && updates.content.trim()) {
@@ -215,7 +234,7 @@ export async function updateEntry(bookName, uid, updates) {
  * @param {boolean} [hardDelete=false] - If true, actually delete instead of disable
  * @returns {Promise<{uid: number, comment: string, action: string}>}
  */
-export async function forgetEntry(bookName, uid, hardDelete = false) {
+export async function forgetEntry(bookName, uid, hardDelete = false, options = {}) {
     const bookData = await loadWorldInfo(bookName);
     if (!bookData || !bookData.entries) {
         throw new Error(`Lorebook "${bookName}" not found or has no entry data.`);
@@ -225,6 +244,8 @@ export async function forgetEntry(bookName, uid, hardDelete = false) {
     if (!entry) {
         throw new Error(`Entry UID ${uid} not found in lorebook "${bookName}".`);
     }
+
+    assertBackgroundEntryMutable(entry, options._backgroundSource);
 
     const comment = entry.comment || `Entry #${uid}`;
     let action;
@@ -259,7 +280,16 @@ export async function forgetEntry(bookName, uid, hardDelete = false) {
  * @param {string} targetNodeId - Destination node ID
  * @returns {Promise<{uid: number, fromLabel: string, toLabel: string}>}
  */
-export async function moveEntry(bookName, uid, targetNodeId) {
+export async function moveEntry(bookName, uid, targetNodeId, options = {}) {
+    if (options._backgroundSource) {
+        const bookData = await loadWorldInfo(bookName);
+        const entry = findEntryByUid(bookData?.entries || {}, uid);
+        if (!entry) {
+            throw new Error(`Entry UID ${uid} not found in lorebook "${bookName}".`);
+        }
+        assertBackgroundEntryMutable(entry, options._backgroundSource);
+    }
+
     const tree = getTree(bookName);
     if (!tree || !tree.root) {
         throw new Error(`No tree found for lorebook "${bookName}".`);
@@ -385,6 +415,9 @@ export async function mergeEntries(bookName, keepUid, removeUid, opts = {}) {
         throw new Error(`Entry UID ${removeUid} (remove) not found in lorebook "${bookName}".`);
     }
 
+    assertBackgroundEntryMutable(keepEntry, opts._backgroundSource);
+    assertBackgroundEntryMutable(removeEntry, opts._backgroundSource);
+
     const removedComment = removeEntry.comment || `Entry #${removeUid}`;
 
     // Merge content
@@ -449,7 +482,7 @@ export async function mergeEntries(bookName, keepUid, removeUid, opts = {}) {
  * @param {string[]} [params.newKeys] - Optional keys for the new entry
  * @returns {Promise<{originalUid: number, originalTitle: string, newUid: number, newTitle: string, nodeLabel: string}>}
  */
-export async function splitEntry(bookName, uid, { keepContent, keepTitle, newContent, newTitle, newKeys }) {
+export async function splitEntry(bookName, uid, { keepContent, keepTitle, newContent, newTitle, newKeys, _backgroundSource }) {
     if (!keepContent || !keepContent.trim()) {
         throw new Error('keepContent cannot be empty — the original entry needs content.');
     }
@@ -469,6 +502,7 @@ export async function splitEntry(bookName, uid, { keepContent, keepTitle, newCon
     if (!original) {
         throw new Error(`Entry UID ${uid} not found in lorebook "${bookName}".`);
     }
+    assertBackgroundEntryMutable(original, _backgroundSource);
     const wasTracker = isTrackerUid(bookName, uid) || isTrackerTitle(original.comment);
 
     // Update the original entry

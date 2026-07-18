@@ -65,6 +65,7 @@ ${bookDesc}`,
                     lorebook,
                     Number(args.uid),
                     args.permanent === true,
+                    { _backgroundSource: args._backgroundSource },
                 );
                 console.log(`[TunnelVision] Forget reason: ${args.reason}`);
                 return `${result.action === 'deleted' ? 'Permanently deleted' : 'Disabled'} memory: "${result.comment}" (UID ${result.uid}). Reason: ${args.reason}`;

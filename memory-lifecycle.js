@@ -63,6 +63,7 @@ import {
 } from "./background-events.js";
 import { getWorldStateText } from "./world-state.js";
 import { shuffleArray, isSystemEntry } from "./shared-utils.js";
+import { isStaticEntry } from "./entry-protection.js";
 import {
   LIFECYCLE_BATCH_LIMIT,
   COMPRESSION_THRESHOLD,
@@ -480,6 +481,7 @@ async function findAndMergeDuplicates(bookName, bookData, chatId) {
   for (const key of Object.keys(bookData.entries)) {
     const entry = bookData.entries[key];
     if (entry.disable) continue;
+    if (isStaticEntry(entry)) continue;
     const title = (entry.comment || "").trim();
     if (!title) continue;
     if (isSystemEntry(entry)) continue;
@@ -556,6 +558,7 @@ async function findAndMergeDuplicates(bookName, bookData, chatId) {
           {
             mergedContent: pair.merged_content || undefined,
             mergedTitle: pair.merged_title || undefined,
+            _backgroundSource: "lifecycle",
           },
         );
         result.merged++;
@@ -597,7 +600,9 @@ async function findAndMergeDuplicates(bookName, bookData, chatId) {
           });
         }
 
-        await forgetEntry(bookName, removeUid, false);
+        await forgetEntry(bookName, removeUid, false, {
+          _backgroundSource: "lifecycle",
+        });
 
         // Record causal chain: the kept entry supersedes the removed one
         setEntrySupersedes(bookName, keepUid, removeUid);
@@ -672,6 +677,7 @@ async function compressVerboseEntries(bookName, bookData, chatId) {
   for (const key of Object.keys(bookData.entries)) {
     const entry = bookData.entries[key];
     if (entry.disable) continue;
+    if (isStaticEntry(entry)) continue;
     if ((entry.content || "").length > COMPRESSION_THRESHOLD) {
       // Skip tracker entries and summaries — they have intentional structure
       if (isSystemEntry(entry)) continue;
@@ -732,6 +738,14 @@ async function compressVerboseEntries(bookName, bookData, chatId) {
       const uidMap = buildUidMap(freshBookData.entries);
       const freshEntry = uidMap.get(entry.uid);
       if (!freshEntry) continue;
+      if (isStaticEntry(freshEntry)) {
+        console.warn(`[TunnelVision] Lifecycle: skipping newly-static entry "${entry.title}" during compression`);
+        continue;
+      }
+      if ((freshEntry.content || "") !== entry.content) {
+        console.warn(`[TunnelVision] Lifecycle: entry "${entry.title}" changed during compression; refusing to overwrite it`);
+        continue;
+      }
 
       recordEntryVersion(bookName, entry.uid, {
         source: "lifecycle",
@@ -739,8 +753,11 @@ async function compressVerboseEntries(bookName, bookData, chatId) {
         previousTitle: freshEntry.comment || "",
       });
 
-      freshEntry.content = compressed;
-      await saveWorldInfo(bookName, freshBookData, true);
+      await updateEntry(bookName, entry.uid, {
+        content: compressed,
+        _backgroundSource: "lifecycle",
+        _expectedContent: entry.content,
+      });
       invalidateWorldInfoCache(bookName);
       result.compressed++;
 
@@ -781,6 +798,7 @@ async function reorganizeTree(bookName, bookData, chatId) {
   for (const key of Object.keys(bookData.entries)) {
     const entry = bookData.entries[key];
     if (!entry || entry.disable) continue;
+    if (isStaticEntry(entry)) continue;
     if (isSummaryTitle(entry.comment) || isTrackerTitle(entry.comment))
       continue;
 
@@ -866,11 +884,17 @@ async function reorganizeTree(bookName, bookData, chatId) {
     indexNodes(tree.root);
 
     const batchUids = new Set(batch.map((e) => e.uid));
+    // Re-read before mutating the tree: a user may have marked an entry static
+    // while the background categorization request was in flight.
+    const freshBookData = await loadWorldInfo(bookName);
+    const freshEntries = freshBookData?.entries || {};
 
     for (const assignment of assignments) {
       if (!assignment?.uid || !assignment?.category) continue;
       const uid = Number(assignment.uid);
       if (!batchUids.has(uid)) continue;
+      const currentEntry = findEntryByUid(freshEntries, uid);
+      if (!currentEntry || isStaticEntry(currentEntry)) continue;
 
       let targetNode = null;
       const catStr = String(assignment.category).trim();
