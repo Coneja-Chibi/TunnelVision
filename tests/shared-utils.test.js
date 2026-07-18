@@ -512,8 +512,10 @@ describe('secret tag', () => {
         expect(SECRET_TAG_RE.test('[SECRETARY] role note')).toBe(false);
     });
 
-    it('guard line and authoring instruction reference the tag', () => {
+    it('guard line and authoring instruction reference the tag without presenting it as privacy control', () => {
         expect(SECRET_GUARD_LINE).toContain('[SECRET');
         expect(SECRET_AUTHORING_INSTRUCTION).toContain('[SECRET');
+        expect(SECRET_GUARD_LINE).toContain('does not hide content');
+        expect(SECRET_AUTHORING_INSTRUCTION).toContain('not privacy or access control');
     });
 });

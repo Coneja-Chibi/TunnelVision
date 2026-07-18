@@ -1084,7 +1084,7 @@ Rules:
 - Skip trivial or generic information
 - Merge related facts into single entries when they belong together
 - If a subject already appears in the "Already in lorebook" list above, write content as an addendum — state only the new specific detail, do NOT restate who they are or repeat their general description
-- Tag a secret ONLY when the chat explicitly shows a character does not know a fact. Prefix that entry's content with [SECRET — <who> is unaware]. Never infer or invent ignorance — if in doubt, omit the tag.
+- Tag a secret ONLY when the chat explicitly shows a character does not know a fact. This is roleplay guidance, not privacy or access control: injected content remains visible to the model. Prefix that entry's content with [SECRET — <who> is unaware]. Never infer or invent ignorance — if in doubt, omit the tag.
 
 Chat log:
 ${chatText}
