@@ -772,3 +772,53 @@ describe('preWarmSmartContext', () => {
         expect(mockState.cachedWorldInfoCalls).toEqual([]);
     });
 });
+
+describe('secret guard', () => {
+    it('prepends the guard when an injected entry is tagged [SECRET]', () => {
+        mockState.maxContextTokens = 0;
+        mockState.activeBooks = ['Lorebook A'];
+        mockState.cachedWorldInfoSyncByBook.set('Lorebook A', {
+            entries: {
+                1: makeEntry({
+                    uid: 10,
+                    comment: 'Elena heritage',
+                    key: ['elena'],
+                    content: '[SECRET — Elena is unaware] Elena is the lost heir.',
+                }),
+            },
+        });
+        mockChat.push(
+            { is_user: true, mes: 'Tell me about Elena.' },
+            { is_user: false, mes: 'Elena trains hard.' },
+        );
+
+        const prompt = buildSmartContextPrompt();
+
+        expect(prompt).toContain('narrator-only dramatic irony');
+        expect(prompt).toContain('[TunnelVision Smart Context');
+    });
+
+    it('omits the guard when no injected entry is tagged', () => {
+        mockState.maxContextTokens = 0;
+        mockState.activeBooks = ['Lorebook A'];
+        mockState.cachedWorldInfoSyncByBook.set('Lorebook A', {
+            entries: {
+                1: makeEntry({
+                    uid: 11,
+                    comment: 'Elena heritage',
+                    key: ['elena'],
+                    content: 'Elena is the lost heir.',
+                }),
+            },
+        });
+        mockChat.push(
+            { is_user: true, mes: 'Tell me about Elena.' },
+            { is_user: false, mes: 'Elena trains hard.' },
+        );
+
+        const prompt = buildSmartContextPrompt();
+
+        expect(prompt).toContain('[TunnelVision Smart Context');
+        expect(prompt).not.toContain('narrator-only dramatic irony');
+    });
+});

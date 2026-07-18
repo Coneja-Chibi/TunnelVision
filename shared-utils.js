@@ -277,3 +277,25 @@ export function formatShortDateTime(dateValue) {
         return '—';
     }
 }
+
+// ── Secret-tag convention ────────────────────────────────────────
+// Entries tagged [SECRET …] guide roleplay when a character has not yet
+// learned the information. The tag is not privacy or access control: injected
+// content remains visible to the model and provider. See docs/superpowers/specs/2026-07-17-secret-tag-convention-design.md
+
+/** Matches the opening of a [SECRET …] tag. No `g` flag → stateless .test(). */
+export const SECRET_TAG_RE = /\[SECRET\b/i;
+
+/** Standing rule injected above smart context when a tagged entry is present. */
+export const SECRET_GUARD_LINE =
+    '[Roleplay guidance: some retrieved entries use [SECRET …] for information a character does not yet know. ' +
+    'This tag does not hide content from the model or provide privacy/access control. ' +
+    'Treat them as narrator-only dramatic irony — do not let that character reveal, act on, or acknowledge the ' +
+    "information until the story establishes they've learned it.]";
+
+/** Appended to write-tool content descriptions so the model applies/removes the tag. */
+export const SECRET_AUTHORING_INSTRUCTION =
+    ' For roleplay guidance only (not privacy or access control), if information is unknown to a character ' +
+    '(secrets, dramatic irony, things not yet learned), ' +
+    'prefix the content with [SECRET — <who> is unaware]. When the story establishes the character has learned it, ' +
+    'update the entry to remove the tag.';

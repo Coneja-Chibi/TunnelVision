@@ -9,6 +9,7 @@ import { getSettings } from '../tree-store.js';
 import { updateEntry } from '../entry-manager.js';
 import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 import { getLanguageInstruction } from '../agent-utils.js';
+import { SECRET_AUTHORING_INSTRUCTION } from '../shared-utils.js';
 
 export const TOOL_NAME = 'TunnelVision_Update';
 export const COMPACT_DESCRIPTION = 'Modify an existing lorebook entry — update content, title, or keys when stored information changes.';
@@ -44,7 +45,7 @@ ${bookDesc}`,
                 },
                 content: {
                     type: 'string',
-                    description: `New content to replace the existing entry content. Write the complete updated version.${getLanguageInstruction()}`,
+                    description: `New content to replace the existing entry content. Write the complete updated version.${SECRET_AUTHORING_INSTRUCTION}${getLanguageInstruction()}`,
                 },
                 title: {
                     type: 'string',

@@ -11,6 +11,7 @@
 import { getSettings } from '../tree-store.js';
 import { mergeEntries, splitEntry, findEntry } from '../entry-manager.js';
 import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
+import { SECRET_AUTHORING_INSTRUCTION } from '../shared-utils.js';
 
 export const TOOL_NAME = 'TunnelVision_MergeSplit';
 export const COMPACT_DESCRIPTION = 'Merge two overlapping entries into one, or split a bloated entry into focused pieces.';
@@ -56,7 +57,7 @@ ${bookDesc}`,
                 },
                 merged_content: {
                     type: 'string',
-                    description: 'For merge: Optional rewritten content for the merged entry. If omitted, contents are concatenated.',
+                    description: `For merge: Optional rewritten content for the merged entry. If omitted, contents are concatenated.${SECRET_AUTHORING_INSTRUCTION}`,
                 },
                 merged_title: {
                     type: 'string',
@@ -69,7 +70,7 @@ ${bookDesc}`,
                 },
                 keep_content: {
                     type: 'string',
-                    description: 'For split: Content that stays in the original entry.',
+                    description: `For split: Content that stays in the original entry.${SECRET_AUTHORING_INSTRUCTION}`,
                 },
                 keep_title: {
                     type: 'string',
@@ -77,7 +78,7 @@ ${bookDesc}`,
                 },
                 new_content: {
                     type: 'string',
-                    description: 'For split: Content for the new split-off entry.',
+                    description: `For split: Content for the new split-off entry.${SECRET_AUTHORING_INSTRUCTION}`,
                 },
                 new_title: {
                     type: 'string',
