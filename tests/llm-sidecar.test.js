@@ -13,6 +13,7 @@ import {
     isSidecarConfigured,
     getSidecarConfig,
     resetCircuitBreaker,
+    isCircuitOpen,
     sidecarGenerate,
     getEmbeddingConfig,
     isEmbeddingSupported,
@@ -181,6 +182,28 @@ describe('resetCircuitBreaker', () => {
         resetCircuitBreaker();
         expect(isSidecarConfigured()).toBe(true);
 
+        vi.unstubAllGlobals();
+    });
+
+    it('re-closes on its own once the cooldown elapses', async () => {
+        mockSidecarProfile = { ...validProfile };
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
+
+        for (let i = 0; i < 3; i++) {
+            try { await sidecarGenerate({ prompt: 'test' }); } catch { /* expected */ }
+        }
+        expect(isCircuitOpen()).toBe(true);
+
+        // Jump past the 5-minute cooldown — the breaker should allow a probe.
+        vi.useFakeTimers();
+        vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1);
+        expect(isCircuitOpen()).toBe(false);
+
+        // One further failure re-opens it immediately (no free second run).
+        try { await sidecarGenerate({ prompt: 'test' }); } catch { /* expected */ }
+        expect(isCircuitOpen()).toBe(true);
+
+        vi.useRealTimers();
         vi.unstubAllGlobals();
     });
 });

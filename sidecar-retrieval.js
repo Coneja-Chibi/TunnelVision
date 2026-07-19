@@ -25,7 +25,7 @@ import {
 } from './tree-store.js';
 import { getReadableBooks } from './tool-registry.js';
 import { hasEvaluableConditions, separateConditions, mapSelectiveLogic, describeSelectiveLogic, CONDITION_DESCRIPTIONS, CONDITION_LABELS, rollKeywordProbability, formatCondition } from './conditions.js';
-import { isSidecarConfigured, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
+import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { logSidecarRetrieval, logConditionalEvaluations, setSidecarActive } from './activity-feed.js';
 import { getKeywordTriggeredUids } from './index.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
@@ -445,6 +445,10 @@ export async function runSidecarRetrieval() {
 
     // Guard: must be enabled and sidecar must be configured
     if (!settings.sidecarAutoRetrieval) return;
+    if (isCircuitOpen()) {
+        console.debug('[TunnelVision] Sidecar auto-retrieval: circuit breaker open — skipping');
+        return;
+    }
     if (!isSidecarConfigured()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval enabled but no sidecar configured — skipping');
         return;

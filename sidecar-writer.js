@@ -25,7 +25,7 @@ import {
     getSettings,
 } from './tree-store.js';
 import { getReadableBooks, getWritableBooks, getBookListWithDescriptions, checkToolConfirmation, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME } from './tool-registry.js';
-import { isSidecarConfigured, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
+import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { getDefinition as getRememberDef } from './tools/remember.js';
 import { getDefinition as getUpdateDef } from './tools/update.js';
 import { getDefinition as getSummarizeDef } from './tools/summarize.js';
@@ -1050,6 +1050,10 @@ export async function runSidecarWriter(messageId = null) {
 
     // Guard: must be enabled and sidecar must be configured
     if (!settings.sidecarPostGenWriter) return;
+    if (isCircuitOpen()) {
+        console.debug('[TunnelVision] Sidecar post-gen writer: circuit breaker open — skipping');
+        return;
+    }
     if (!isSidecarConfigured()) {
         console.debug('[TunnelVision] Sidecar post-gen writer enabled but no sidecar configured — skipping');
         return;
