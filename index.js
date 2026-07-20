@@ -999,7 +999,7 @@ async function onGenerationStarted(type, opts, dryRun) {
     // Sidecar auto-retrieval: pre-fetch relevant entries before generation (first pass only)
     if (settings.sidecarAutoRetrieval && settings.globalEnabled !== false) {
         try {
-            await runSidecarRetrieval();
+            await runSidecarRetrieval(type);
         } catch (err) {
             console.error('[TunnelVision] Sidecar auto-retrieval error:', err);
         }

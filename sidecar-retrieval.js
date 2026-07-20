@@ -25,7 +25,7 @@ import {
 } from './tree-store.js';
 import { getReadableBooks } from './tool-registry.js';
 import { hasEvaluableConditions, separateConditions, mapSelectiveLogic, describeSelectiveLogic, CONDITION_DESCRIPTIONS, CONDITION_LABELS, rollKeywordProbability, formatCondition } from './conditions.js';
-import { isSidecarConfigured, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
+import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { logSidecarRetrieval, logConditionalEvaluations, setSidecarActive } from './activity-feed.js';
 import { getKeywordTriggeredUids } from './index.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
@@ -112,17 +112,25 @@ function formatNodeForSidecar(node, depth, isRoot = false) {
 /**
  * Extract recent chat messages for sidecar context.
  * @param {number} maxMessages
+ * @param {boolean} [dropLast] Exclude the tail message (swipes — see below).
  * @returns {string}
  */
-function extractRecentChat(maxMessages = 10) {
+function extractRecentChat(maxMessages = 10, dropLast = false) {
     const context = getContext();
     const chat = context.chat;
     if (!chat || chat.length === 0) return '';
 
-    const lines = [];
-    const start = Math.max(0, chat.length - maxMessages);
+    // On a swipe the rejected response is still sitting in chat[] — ST only drops
+    // it from its own prompt (`if (type === 'swipe') coreChat.pop()`) long after
+    // GENERATION_STARTED fires, so we have to drop it ourselves or the sidecar
+    // retrieves lore based on the response the user just rejected.
+    const end = dropLast ? chat.length - 1 : chat.length;
+    if (end <= 0) return '';
 
-    for (let i = start; i < chat.length; i++) {
+    const lines = [];
+    const start = Math.max(0, end - maxMessages);
+
+    for (let i = start; i < end; i++) {
         const msg = chat[i];
         if (msg.is_system) continue;
         const role = msg.is_user ? 'User' : 'Character';
@@ -438,13 +446,18 @@ async function resolveConditionalContent(evaluations, conditionalEntries) {
  * Run sidecar auto-retrieval before a generation.
  * Called from onGenerationStarted in index.js.
  *
+ * @param {string} [type] ST generation type — 'swipe' excludes the rejected tail message.
  * @returns {Promise<void>}
  */
-export async function runSidecarRetrieval() {
+export async function runSidecarRetrieval(type = null) {
     const settings = getSettings();
 
     // Guard: must be enabled and sidecar must be configured
     if (!settings.sidecarAutoRetrieval) return;
+    if (isCircuitOpen()) {
+        console.debug('[TunnelVision] Sidecar auto-retrieval: circuit breaker open — skipping');
+        return;
+    }
     if (!isSidecarConfigured()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval enabled but no sidecar configured — skipping');
         return;
@@ -462,7 +475,7 @@ export async function runSidecarRetrieval() {
 
     // Extract recent chat
     const contextMessages = settings.sidecarContextMessages ?? 10;
-    const recentChat = extractRecentChat(contextMessages);
+    const recentChat = extractRecentChat(contextMessages, type === 'swipe');
     if (!recentChat.trim()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval: no recent chat context');
         return;

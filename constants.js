@@ -571,9 +571,14 @@ export const CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000;
  * Default timeout (ms) for a single sidecar LLM generation request.
  * Prevents indefinite hangs when the endpoint is unresponsive.
  *
+ * Sized for slow providers: retrieval and writer prompts are large, and a
+ * backend running at a few tokens/sec can legitimately take over a minute.
+ * Too tight a value shows up as AbortError, which trips the circuit breaker
+ * and silently disables the sidecar.
+ *
  * @see llm-sidecar.js — sidecarGenerate
  */
-export const SIDECAR_DEFAULT_TIMEOUT_MS = 30_000;
+export const SIDECAR_DEFAULT_TIMEOUT_MS = 90_000;
 
 /**
  * Timeout (ms) for sidecar connectivity tests. Shorter than the
