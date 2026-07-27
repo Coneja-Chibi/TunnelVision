@@ -343,6 +343,34 @@ export const SETTING_DEFAULTS = {
     postTurnUpdateTrackers: true,
     postTurnExtractFacts: true,
     postTurnSceneArchive: true,
+    // Rolling world state (living document, updated periodically, injected every turn)
+    worldStateEnabled: false,
+    worldStateInterval: 10,
+    worldStateDepth: 2,
+    worldStateMaxChars: 3000,
+    worldStatePosition: 'in_chat',
+    worldStateRole: 'system',
+    worldStateInjectionOverride: '',
+    worldStateUpdateOverride: '',
+    // Smart context (chat-mention-driven relevance injection, separate from tree search)
+    smartContextEnabled: false,
+    smartContextDepth: 3,
+    smartContextLookback: 6,
+    smartContextMaxChars: 4000,
+    smartContextMaxEntries: 8,
+    smartContextPosition: 'in_chat',
+    smartContextRole: 'system',
+    // Memory lifecycle (periodic dedup/compress/reorganize maintenance)
+    lifecycleEnabled: false,
+    lifecycleInterval: 30,
+    lifecycleCompress: true,
+    lifecycleConsolidate: true,
+    lifecycleReorganize: true,
+    // Combined char budget across mandatory/worldState/smartContext/notebook prompts. 0 = unlimited.
+    totalInjectionBudget: 0,
+    // Per-call timeout for background LLM calls (tree building, world state, smart context,
+    // memory lifecycle, post-turn), in ms.
+    llmCallTimeout: 120000,
     // Per-lorebook permissions: { bookName: 'read_write' | 'read_only' | 'write_only' }
     bookPermissions: {},
     // Per-lorebook injection mode: { bookName: 'sidecar' | 'native' }

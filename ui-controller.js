@@ -227,6 +227,61 @@ export function bindUIEvents() {
     $('#tv_book_permission').on('change', onBookPermissionChange);
     $('#tv_book_injection_mode').on('change', onBookInjectionModeChange);
 
+    // Rolling World State collapsible header + settings
+    $('#tv_world_state_header').on('click', function () {
+        $(this).toggleClass('expanded');
+        $(this).next('.tv-card-body').slideToggle(200);
+    });
+    $('#tv_world_state_enabled').on('change', onWorldStateToggle);
+    $('#tv_world_state_interval').on('change', onWorldStateIntervalChange);
+    $('#tv_world_state_max_chars').on('change', onWorldStateMaxCharsChange);
+    $('#tv_world_state_position').on('change', onWorldStateInjectionMetaChange);
+    $('#tv_world_state_depth').on('change', onWorldStateInjectionMetaChange);
+    $('#tv_world_state_role').on('change', onWorldStateInjectionMetaChange);
+    $('#tv_world_state_injection_override').on('change', onWorldStateInjectionOverrideChange);
+    $('#tv_world_state_injection_reset').on('click', onWorldStateInjectionReset);
+    $('#tv_world_state_update_override').on('change', onWorldStateUpdateOverrideChange);
+    $('#tv_world_state_update_reset').on('click', onWorldStateUpdateReset);
+
+    // Smart Context collapsible header + settings
+    $('#tv_smart_context_header').on('click', function () {
+        $(this).toggleClass('expanded');
+        $(this).next('.tv-card-body').slideToggle(200);
+    });
+    $('#tv_smart_context_enabled').on('change', onSmartContextToggle);
+    $('#tv_smart_context_lookback').on('change', onSmartContextLookbackChange);
+    $('#tv_smart_context_max_entries').on('change', onSmartContextMaxEntriesChange);
+    $('#tv_smart_context_max_chars').on('change', onSmartContextMaxCharsChange);
+    $('#tv_smart_context_position').on('change', onSmartContextInjectionMetaChange);
+    $('#tv_smart_context_depth').on('change', onSmartContextInjectionMetaChange);
+    $('#tv_smart_context_role').on('change', onSmartContextInjectionMetaChange);
+
+    // Memory Lifecycle collapsible header + settings
+    $('#tv_lifecycle_header').on('click', function () {
+        $(this).toggleClass('expanded');
+        $(this).next('.tv-card-body').slideToggle(200);
+    });
+    $('#tv_lifecycle_enabled').on('change', onLifecycleToggle);
+    $('#tv_lifecycle_interval').on('change', onLifecycleIntervalChange);
+    $('#tv_lifecycle_consolidate').on('change', onLifecycleConsolidateToggle);
+    $('#tv_lifecycle_compress').on('change', onLifecycleCompressToggle);
+    $('#tv_lifecycle_reorganize').on('change', onLifecycleReorganizeToggle);
+
+    // Post-Turn Processor collapsible header + settings
+    $('#tv_post_turn_header').on('click', function () {
+        $(this).toggleClass('expanded');
+        $(this).next('.tv-card-body').slideToggle(200);
+    });
+    $('#tv_post_turn_enabled').on('change', onPostTurnToggle);
+    $('#tv_post_turn_cooldown').on('change', onPostTurnCooldownChange);
+    $('#tv_post_turn_update_trackers').on('change', onPostTurnUpdateTrackersToggle);
+    $('#tv_post_turn_extract_facts').on('change', onPostTurnExtractFactsToggle);
+    $('#tv_post_turn_scene_archive').on('change', onPostTurnSceneArchiveToggle);
+
+    // Global injection budget + background LLM call timeout
+    $('#tv_total_injection_budget').on('change', onTotalInjectionBudgetChange);
+    $('#tv_llm_call_timeout').on('change', onLlmCallTimeoutChange);
+
     // Backup & Restore collapsible header
     $('#tv_backup_header').on('click', function () {
         $(this).toggleClass('expanded');
@@ -358,6 +413,53 @@ export function refreshUI() {
 
     // Sync sidecar/embedding profiles + sampler controls
     populateSidecarProfiles();
+
+    // Sync rolling world state
+    const worldStateEnabled = settings.worldStateEnabled === true;
+    $('#tv_world_state_enabled').prop('checked', worldStateEnabled);
+    $('#tv_world_state_fields').toggle(worldStateEnabled);
+    $('#tv_world_state_interval').val(settings.worldStateInterval ?? 10);
+    $('#tv_world_state_max_chars').val(settings.worldStateMaxChars ?? 3000);
+    $('#tv_world_state_position').val(settings.worldStatePosition || 'in_chat');
+    $('#tv_world_state_depth').val(settings.worldStateDepth ?? 2);
+    $('#tv_world_state_role').val(settings.worldStateRole || 'system');
+    $('#tv_world_state_depth_row').toggle((settings.worldStatePosition || 'in_chat') === 'in_chat');
+    $('#tv_world_state_injection_override').val(settings.worldStateInjectionOverride || '');
+    $('#tv_world_state_update_override').val(settings.worldStateUpdateOverride || '');
+
+    // Sync smart context
+    const smartContextEnabled = settings.smartContextEnabled === true;
+    $('#tv_smart_context_enabled').prop('checked', smartContextEnabled);
+    $('#tv_smart_context_fields').toggle(smartContextEnabled);
+    $('#tv_smart_context_lookback').val(settings.smartContextLookback ?? 6);
+    $('#tv_smart_context_max_entries').val(settings.smartContextMaxEntries ?? 8);
+    $('#tv_smart_context_max_chars').val(settings.smartContextMaxChars ?? 4000);
+    $('#tv_smart_context_position').val(settings.smartContextPosition || 'in_chat');
+    $('#tv_smart_context_depth').val(settings.smartContextDepth ?? 3);
+    $('#tv_smart_context_role').val(settings.smartContextRole || 'system');
+    $('#tv_smart_context_depth_row').toggle((settings.smartContextPosition || 'in_chat') === 'in_chat');
+
+    // Sync memory lifecycle
+    const lifecycleEnabled = settings.lifecycleEnabled === true;
+    $('#tv_lifecycle_enabled').prop('checked', lifecycleEnabled);
+    $('#tv_lifecycle_fields').toggle(lifecycleEnabled);
+    $('#tv_lifecycle_interval').val(settings.lifecycleInterval ?? 30);
+    $('#tv_lifecycle_consolidate').prop('checked', settings.lifecycleConsolidate !== false);
+    $('#tv_lifecycle_compress').prop('checked', settings.lifecycleCompress !== false);
+    $('#tv_lifecycle_reorganize').prop('checked', settings.lifecycleReorganize !== false);
+
+    // Sync post-turn processor
+    const postTurnEnabled = settings.postTurnEnabled === true;
+    $('#tv_post_turn_enabled').prop('checked', postTurnEnabled);
+    $('#tv_post_turn_fields').toggle(postTurnEnabled);
+    $('#tv_post_turn_cooldown').val(settings.postTurnCooldown ?? 1);
+    $('#tv_post_turn_update_trackers').prop('checked', settings.postTurnUpdateTrackers !== false);
+    $('#tv_post_turn_extract_facts').prop('checked', settings.postTurnExtractFacts !== false);
+    $('#tv_post_turn_scene_archive').prop('checked', settings.postTurnSceneArchive !== false);
+
+    // Sync total injection budget + background LLM call timeout (stored in ms, shown in seconds)
+    $('#tv_total_injection_budget').val(settings.totalInjectionBudget ?? 0);
+    $('#tv_llm_call_timeout').val(Math.round((settings.llmCallTimeout ?? 120000) / 1000));
 
     populateLorebookDropdown();
     $('#tv_lorebook_controls').toggle(!!currentLorebook);
@@ -1091,6 +1193,201 @@ function onBookInjectionModeChange() {
     if (!currentLorebook) return;
     setBookInjectionMode(currentLorebook, $(this).val() || 'sidecar');
     registerTools();
+}
+
+// ─── Rolling World State ─────────────────────────────────────────
+
+function onWorldStateToggle() {
+    const settings = getSettings();
+    settings.worldStateEnabled = $(this).prop('checked');
+    $('#tv_world_state_fields').toggle(settings.worldStateEnabled);
+    saveSettingsDebounced();
+}
+
+function onWorldStateIntervalChange() {
+    const settings = getSettings();
+    settings.worldStateInterval = Number($(this).val()) || 10;
+    saveSettingsDebounced();
+}
+
+function onWorldStateMaxCharsChange() {
+    const settings = getSettings();
+    settings.worldStateMaxChars = Number($(this).val()) || 3000;
+    saveSettingsDebounced();
+}
+
+function onWorldStateInjectionMetaChange() {
+    const settings = getSettings();
+    const $el = $(this);
+    const field = ($el.attr('id') || '').replace('tv_world_state_', '');
+    if (field === 'position') {
+        settings.worldStatePosition = $el.val();
+        $('#tv_world_state_depth_row').toggle($el.val() === 'in_chat');
+    } else if (field === 'depth') {
+        const rawDepth = Number($el.val());
+        settings.worldStateDepth = Math.max(0, Math.round(Number.isFinite(rawDepth) ? rawDepth : 2));
+        $el.val(settings.worldStateDepth);
+    } else if (field === 'role') {
+        settings.worldStateRole = $el.val();
+    }
+    saveSettingsDebounced();
+}
+
+function onWorldStateInjectionOverrideChange() {
+    const settings = getSettings();
+    settings.worldStateInjectionOverride = $(this).val() || '';
+    saveSettingsDebounced();
+}
+
+function onWorldStateInjectionReset() {
+    const settings = getSettings();
+    settings.worldStateInjectionOverride = '';
+    $('#tv_world_state_injection_override').val('');
+    saveSettingsDebounced();
+}
+
+function onWorldStateUpdateOverrideChange() {
+    const settings = getSettings();
+    settings.worldStateUpdateOverride = $(this).val() || '';
+    saveSettingsDebounced();
+}
+
+function onWorldStateUpdateReset() {
+    const settings = getSettings();
+    settings.worldStateUpdateOverride = '';
+    $('#tv_world_state_update_override').val('');
+    saveSettingsDebounced();
+}
+
+// ─── Smart Context ───────────────────────────────────────────────
+
+function onSmartContextToggle() {
+    const settings = getSettings();
+    settings.smartContextEnabled = $(this).prop('checked');
+    $('#tv_smart_context_fields').toggle(settings.smartContextEnabled);
+    saveSettingsDebounced();
+}
+
+function onSmartContextLookbackChange() {
+    const settings = getSettings();
+    settings.smartContextLookback = Number($(this).val()) || 6;
+    saveSettingsDebounced();
+}
+
+function onSmartContextMaxEntriesChange() {
+    const settings = getSettings();
+    settings.smartContextMaxEntries = Number($(this).val()) || 8;
+    saveSettingsDebounced();
+}
+
+function onSmartContextMaxCharsChange() {
+    const settings = getSettings();
+    settings.smartContextMaxChars = Number($(this).val()) || 4000;
+    saveSettingsDebounced();
+}
+
+function onSmartContextInjectionMetaChange() {
+    const settings = getSettings();
+    const $el = $(this);
+    const field = ($el.attr('id') || '').replace('tv_smart_context_', '');
+    if (field === 'position') {
+        settings.smartContextPosition = $el.val();
+        $('#tv_smart_context_depth_row').toggle($el.val() === 'in_chat');
+    } else if (field === 'depth') {
+        const rawDepth = Number($el.val());
+        settings.smartContextDepth = Math.max(0, Math.round(Number.isFinite(rawDepth) ? rawDepth : 3));
+        $el.val(settings.smartContextDepth);
+    } else if (field === 'role') {
+        settings.smartContextRole = $el.val();
+    }
+    saveSettingsDebounced();
+}
+
+// ─── Memory Lifecycle ────────────────────────────────────────────
+
+function onLifecycleToggle() {
+    const settings = getSettings();
+    settings.lifecycleEnabled = $(this).prop('checked');
+    $('#tv_lifecycle_fields').toggle(settings.lifecycleEnabled);
+    saveSettingsDebounced();
+}
+
+function onLifecycleIntervalChange() {
+    const settings = getSettings();
+    settings.lifecycleInterval = Number($(this).val()) || 30;
+    saveSettingsDebounced();
+}
+
+function onLifecycleConsolidateToggle() {
+    const settings = getSettings();
+    settings.lifecycleConsolidate = $(this).prop('checked');
+    saveSettingsDebounced();
+}
+
+function onLifecycleCompressToggle() {
+    const settings = getSettings();
+    settings.lifecycleCompress = $(this).prop('checked');
+    saveSettingsDebounced();
+}
+
+function onLifecycleReorganizeToggle() {
+    const settings = getSettings();
+    settings.lifecycleReorganize = $(this).prop('checked');
+    saveSettingsDebounced();
+}
+
+// ─── Post-Turn Processor ─────────────────────────────────────────
+
+function onPostTurnToggle() {
+    const settings = getSettings();
+    settings.postTurnEnabled = $(this).prop('checked');
+    $('#tv_post_turn_fields').toggle(settings.postTurnEnabled);
+    saveSettingsDebounced();
+}
+
+function onPostTurnCooldownChange() {
+    const settings = getSettings();
+    settings.postTurnCooldown = Math.max(Number($(this).val()) || 1, 1);
+    $(this).val(settings.postTurnCooldown);
+    saveSettingsDebounced();
+}
+
+function onPostTurnUpdateTrackersToggle() {
+    const settings = getSettings();
+    settings.postTurnUpdateTrackers = $(this).prop('checked');
+    saveSettingsDebounced();
+}
+
+function onPostTurnExtractFactsToggle() {
+    const settings = getSettings();
+    settings.postTurnExtractFacts = $(this).prop('checked');
+    saveSettingsDebounced();
+}
+
+function onPostTurnSceneArchiveToggle() {
+    const settings = getSettings();
+    settings.postTurnSceneArchive = $(this).prop('checked');
+    saveSettingsDebounced();
+}
+
+// ─── Global Injection Budget + Background LLM Timeout ───────────
+
+function onTotalInjectionBudgetChange() {
+    const raw = Number($('#tv_total_injection_budget').val());
+    const clamped = Math.min(Math.max(Math.round(Number.isFinite(raw) ? raw : 0), 0), 100000);
+    $('#tv_total_injection_budget').val(clamped);
+    const settings = getSettings();
+    settings.totalInjectionBudget = clamped;
+    saveSettingsDebounced();
+}
+
+function onLlmCallTimeoutChange() {
+    const raw = Number($('#tv_llm_call_timeout').val());
+    const clampedSeconds = Math.min(Math.max(Math.round(raw) || 120, 10), 600);
+    $('#tv_llm_call_timeout').val(clampedSeconds);
+    const settings = getSettings();
+    settings.llmCallTimeout = clampedSeconds * 1000;
+    saveSettingsDebounced();
 }
 
 function populateSidecarProfiles() {
