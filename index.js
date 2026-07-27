@@ -32,6 +32,9 @@ import { initActivityFeed } from './activity-feed.js';
 import { initCommands } from './commands.js';
 import { initAutoSummary } from './auto-summary.js';
 import { initPostTurnProcessor } from './post-turn-processor.js';
+import { initWorldState } from './world-state.js';
+import { initSmartContext } from './smart-context.js';
+import { initMemoryLifecycle } from './memory-lifecycle.js';
 import { runSidecarRetrieval, clearRetrievalPrompt } from './sidecar-retrieval.js';
 import { runSidecarWriter, revertMessageSnapshots, revertInvalidSnapshots, hydrateSnapshots } from './sidecar-writer.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
@@ -80,6 +83,12 @@ async function init() {
 
     // Wire up post-turn processor (tracker updates, fact extraction, scene archiving)
     initPostTurnProcessor();
+
+    // Wire up rolling world state, smart context, and memory lifecycle —
+    // each is a no-op per event until its own *Enabled setting is turned on.
+    initWorldState();
+    initSmartContext();
+    initMemoryLifecycle();
 
     // Inject condition editor into ST's base lorebook editor
     initWIConditionInjector();
