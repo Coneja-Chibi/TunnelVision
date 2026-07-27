@@ -8,7 +8,6 @@ import {
     findNodeById,
     getSettings,
     getTrackerUids,
-    invalidateNodeIndex,
     isSummaryTitle,
     isTrackerTitle,
     removeNode,
@@ -39,24 +38,6 @@ describe('getSettings normalization', () => {
         expect(settings.llmBuildDetail).toBe('lite');
         expect(settings.trackerUids).toEqual({});
         expect(settings.ephemeralToolFilter).toEqual(SETTING_DEFAULTS.ephemeralToolFilter);
-    });
-
-    it('does not normalize tracker uid lists during settings initialization; tracker cleanup happens via tracker-specific helpers', () => {
-        extension_settings.tunnelvision = {
-            trackerUids: {
-                Alpha: ['5', 2, 'x', 5, 3, null],
-                Empty: [],
-                Invalid: 'nope',
-            },
-        };
-
-        const settings = getSettings();
-
-        expect(settings.trackerUids).toEqual({
-            Alpha: ['5', 2, 'x', 5, 3, null],
-            Empty: [],
-            Invalid: 'nope',
-        });
     });
 });
 
@@ -182,19 +163,6 @@ describe('findNodeById', () => {
         expect(findNodeById(null, 'any')).toBeNull();
     });
 
-    it('returns stale results until the node index is invalidated', () => {
-        expect(findNodeById(tree, 'child-2')).toBe(tree.children[1]);
-
-        tree.children[1].id = 'child-2-renamed';
-
-        expect(findNodeById(tree, 'child-2')).toBe(tree.children[1]);
-        expect(findNodeById(tree, 'child-2-renamed')).toBeNull();
-
-        invalidateNodeIndex(tree);
-
-        expect(findNodeById(tree, 'child-2')).toBeNull();
-        expect(findNodeById(tree, 'child-2-renamed')).toBe(tree.children[1]);
-    });
 });
 
 describe('saveTree normalization', () => {

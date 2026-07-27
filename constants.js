@@ -236,6 +236,16 @@ export const EMBEDDING_MAX_TEXT_LENGTH = 500;
 export const EMBEDDING_CACHE_TTL_DAYS = 7;
 
 /**
+ * Hard cap on the number of records kept in the persistent embedding store.
+ * The TTL alone doesn't bound growth within its window — every content edit
+ * of an entry writes a new "bookName:uid:contentHash" record — so hydration
+ * also enforces this cap, evicting the oldest records beyond it.
+ *
+ * @see embedding-cache.js — hydrateFromStore eviction
+ */
+export const EMBEDDING_CACHE_MAX_RECORDS = 2000;
+
+/**
  * Embedding cosine similarity → score boost mapping.
  * Higher similarity to recent chat text earns a larger boost
  * in the smart context candidate scoring pipeline.

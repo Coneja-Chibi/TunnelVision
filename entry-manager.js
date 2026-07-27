@@ -800,10 +800,22 @@ Respond with ONLY a JSON array of fact objects (no markdown, no code fences).`;
  */
 export function buildSummaryKeys(parsed, participants = [], significance = 'moderate') {
     const keys = [];
-    if (participants?.length) keys.push(...participants);
-    if (parsed?.arc) keys.push(parsed.arc);
-    if (parsed?.when) keys.push(parsed.when);
-    if (significance) keys.push(significance);
-    // Deduplicate
-    return [...new Set(keys.filter(Boolean))];
+    if (participants?.length) {
+        keys.push(...participants.map((p) => String(p).trim().toLowerCase()));
+    }
+    // The LLM is explicitly prompted for "keys" (see summary-hierarchy.js) —
+    // merge them in instead of discarding them.
+    if (Array.isArray(parsed?.keys)) {
+        keys.push(...parsed.keys.map((k) => String(k).trim().toLowerCase()));
+    }
+    if (parsed?.arc) keys.push(String(parsed.arc).trim().toLowerCase());
+    if (parsed?.when) {
+        const when = String(parsed.when).trim().toLowerCase();
+        if (when && when !== 'unspecified') keys.push(when);
+    }
+    // Use the 'summary:<significance>' convention (matching tools/summarize.js)
+    // instead of a bare significance word.
+    if (significance) keys.push(`summary:${significance}`);
+    // Deduplicate and drop noise-length keys
+    return [...new Set(keys.filter((k) => k && k.length >= 2))];
 }

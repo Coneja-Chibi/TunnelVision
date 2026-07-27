@@ -13,9 +13,13 @@ export default defineConfig({
             { find: '../../../st-context.js', replacement: resolve(__dirname, 'tests/__mocks__/st-context.js') },
             { find: '../../../../st-context.js', replacement: resolve(__dirname, 'tests/__mocks__/st-context.js') },
             { find: '../../../world-info.js', replacement: resolve(__dirname, 'tests/__mocks__/st-world-info.js') },
+            { find: '../../../../world-info.js', replacement: resolve(__dirname, 'tests/__mocks__/st-world-info.js') },
             { find: '../../../tool-calling.js', replacement: resolve(__dirname, 'tests/__mocks__/st-tool-calling.js') },
             { find: '../../../utils.js', replacement: resolve(__dirname, 'tests/__mocks__/st-utils.js') },
             { find: '../../../popup.js', replacement: resolve(__dirname, 'tests/__mocks__/st-popup.js') },
+            { find: '../../../group-chats.js', replacement: resolve(__dirname, 'tests/__mocks__/st-group-chats.js') },
+            { find: '../../../../chats.js', replacement: resolve(__dirname, 'tests/__mocks__/st-chats.js') },
+            { find: '../../../power-user.js', replacement: resolve(__dirname, 'tests/__mocks__/st-power-user.js') },
         ],
     },
     test: {

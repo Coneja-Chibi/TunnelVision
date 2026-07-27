@@ -38,6 +38,7 @@ import { buildTreeFromMetadata, buildTreeWithLLM, generateSummariesForTree, inge
 import { testSidecarConnectivity, testEmbeddingConnectivity } from './llm-sidecar.js';
 import { registerTools, unregisterTools, getDefaultToolDescriptions, stripDynamicContent } from './tool-registry.js';
 import { runDiagnostics } from './diagnostics.js';
+import { clearRetrievalPrompt } from './sidecar-retrieval.js';
 import { applyRecurseLimit } from './index.js';
 import { refreshHiddenToolCallMessages } from './activity-feed.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
@@ -249,7 +250,9 @@ export function refreshUI() {
 
     // Trigger active editor refresh if open
     if (activeEditorRefresh) {
-        activeEditorRefresh();
+        Promise.resolve(activeEditorRefresh()).catch((e) => {
+            console.error('[TunnelVision] Tree editor refresh failed:', e);
+        });
     }
 
     $('#tv_global_enabled').prop('checked', globalEnabled);
@@ -835,7 +838,10 @@ function onPromptInjectionChange() {
             settings.mandatoryPromptPosition = $el.val();
             $('#tv_mandatory_depth_row').toggle($el.val() === 'in_chat');
         } else if (field === 'depth') {
-            settings.mandatoryPromptDepth = Math.max(1, Math.round(Number($el.val()) || 1));
+            // min="0" is a legal depth (inject after the final message) — don't
+            // let a falsy `0` get coerced up to 1.
+            const rawDepth = Number($el.val());
+            settings.mandatoryPromptDepth = Math.max(0, Math.round(Number.isFinite(rawDepth) ? rawDepth : 1));
             $el.val(settings.mandatoryPromptDepth);
         } else if (field === 'role') {
             settings.mandatoryPromptRole = $el.val();
@@ -846,7 +852,8 @@ function onPromptInjectionChange() {
             settings.notebookPromptPosition = $el.val();
             $('#tv_notebook_depth_row').toggle($el.val() === 'in_chat');
         } else if (field === 'depth') {
-            settings.notebookPromptDepth = Math.max(1, Math.round(Number($el.val()) || 1));
+            const rawDepth = Number($el.val());
+            settings.notebookPromptDepth = Math.max(0, Math.round(Number.isFinite(rawDepth) ? rawDepth : 1));
             $el.val(settings.notebookPromptDepth);
         } else if (field === 'role') {
             settings.notebookPromptRole = $el.val();
@@ -1026,6 +1033,11 @@ function onSidecarAutoRetrievalToggle() {
     const settings = getSettings();
     settings.sidecarAutoRetrieval = $(this).prop('checked');
     $('#tv_sidecar_retrieval_fields').toggle(settings.sidecarAutoRetrieval);
+    if (!settings.sidecarAutoRetrieval) {
+        // Don't leave a previously injected retrieval prompt stuck in context
+        // now that the feature has been turned off.
+        clearRetrievalPrompt(settings);
+    }
     saveSettingsDebounced();
 }
 
@@ -1146,7 +1158,7 @@ async function onOpenTreeEditor() {
     if (bookData?.entries) {
         await syncTrackerUidsForLorebook(currentLorebook, bookData.entries);
     }
-    const entryLookup = buildEntryLookup(bookData);
+    let entryLookup = buildEntryLookup(bookData);
     const bookName = currentLorebook;
 
     // State: which node is selected in the tree

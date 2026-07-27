@@ -453,23 +453,32 @@ export async function runSidecarRetrieval(type = null) {
     const settings = getSettings();
 
     // Guard: must be enabled and sidecar must be configured
-    if (!settings.sidecarAutoRetrieval) return;
+    if (!settings.sidecarAutoRetrieval) {
+        clearRetrievalPrompt(settings);
+        return;
+    }
     if (isCircuitOpen()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval: circuit breaker open — skipping');
+        clearRetrievalPrompt(settings);
         return;
     }
     if (!isSidecarConfigured()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval enabled but no sidecar configured — skipping');
+        clearRetrievalPrompt(settings);
         return;
     }
 
     const activeBooks = getReadableBooks();
-    if (activeBooks.length === 0) return;
+    if (activeBooks.length === 0) {
+        clearRetrievalPrompt(settings);
+        return;
+    }
 
     // Build tree overview
     const treeOverview = buildSidecarTreeOverview();
     if (!treeOverview.trim()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval: no tree content to navigate');
+        clearRetrievalPrompt(settings);
         return;
     }
 
@@ -478,6 +487,7 @@ export async function runSidecarRetrieval(type = null) {
     const recentChat = extractRecentChat(contextMessages, type === 'swipe');
     if (!recentChat.trim()) {
         console.debug('[TunnelVision] Sidecar auto-retrieval: no recent chat context');
+        clearRetrievalPrompt(settings);
         return;
     }
 
@@ -596,7 +606,7 @@ export async function runSidecarRetrieval(type = null) {
  * Clear the sidecar retrieval prompt (no content to inject).
  * @param {Object} settings
  */
-function clearRetrievalPrompt(settings) {
+export function clearRetrievalPrompt(settings) {
     lastInjectedNodeIds = [];
     const position = mapPosition(settings.mandatoryPromptPosition);
     const depth = settings.mandatoryPromptDepth ?? 1;

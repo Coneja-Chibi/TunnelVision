@@ -256,7 +256,9 @@ describe('updateTrackers', () => {
         const result = await updateTrackers(trackers, 'Sophia steadies herself.', 'test-chat');
 
         expect(result.updated).toBe(1);
-        expect(result.staleSkips).toEqual([]);
+        expect(result.staleSkips).toEqual([
+            { uid: 7, book: 'test-book', title: '[Tracker: Sophia Fuchs]' },
+        ]);
         expect(updateEntry).toHaveBeenCalledWith('test-book', 7, {
             content: '## Current Status\nMood: alert',
             _source: 'post-turn',

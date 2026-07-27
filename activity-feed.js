@@ -10,6 +10,7 @@ import { ALL_TOOL_NAMES, getActiveTunnelVisionBooks } from './tool-registry.js';
 import { getSettings, isLorebookEnabled, getTree } from './tree-store.js';
 import { openTreeEditorForBook } from './ui-controller.js';
 import { getSidecarModelLabel } from './llm-sidecar.js';
+import { _registerFeedCallbacks, clearFailedTasks } from './background-events.js';
 
 const MAX_FEED_ITEMS = 50;
 const MAX_RENDERED_RETRIEVED_ENTRIES = 5;
@@ -86,6 +87,17 @@ export function initActivityFeed() {
     if (feedInitialized) return;
     feedInitialized = true;
 
+    // Wire the visual side of background-events.js's callback-based event bus.
+    // Without this, addBackgroundEvent() from post-turn-processor.js, world-state.js,
+    // smart-context.js and summary-hierarchy.js is silently discarded, and failed
+    // background tasks have no UI to list or dismiss them.
+    _registerFeedCallbacks({
+        addFeedItems,
+        setTriggerActive: setBackgroundTaskActive,
+        refreshTasksUI,
+        getFeedItems,
+    });
+
     loadFeed();
     createTriggerButton();
     createPanel();
@@ -109,6 +121,7 @@ export function initActivityFeed() {
     if (event_types.CHAT_CHANGED) {
         eventSource.on(event_types.CHAT_CHANGED, () => {
             loadFeed();
+            clearFailedTasks();
             if (panelEl?.classList.contains('open')) renderAllItems();
             queueHiddenToolCallRefresh(false);
         });
@@ -703,6 +716,24 @@ function pulseTrigger() {
 export function setSidecarActive(active) {
     if (!triggerEl) return;
     triggerEl.classList.toggle('tv-float-sidecar-active', active);
+}
+
+/**
+ * Show a visual indicator on the trigger button that a background task
+ * (post-turn processing, world-state update, lifecycle maintenance, etc.)
+ * is running. Passed to background-events.js as the `setTriggerActive` callback.
+ */
+function setBackgroundTaskActive(active) {
+    if (!triggerEl) return;
+    triggerEl.classList.toggle('tv-float-bg-active', active);
+}
+
+/**
+ * Re-render the panel (active/failed task rows) if it's currently open.
+ * Passed to background-events.js as the `refreshTasksUI` callback.
+ */
+function refreshTasksUI() {
+    if (panelEl?.classList.contains('open')) renderAllItems();
 }
 
 function trimFeed() {

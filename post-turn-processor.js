@@ -878,7 +878,7 @@ async function archiveScene(targetBook, chat, sceneChange, chatId) {
       // Hide old-scene messages and advance watermark with the correct
       // range (watermark+1 → sceneEndIdx), not the full-chat tail.
       try {
-        await hideSummarizedMessages(undefined, { endIndex: sceneEndIdx });
+        await hideSummarizedMessages(undefined, watermark + 1, sceneEndIdx);
       } catch (e) {
         console.warn("[TunnelVision] Scene archive hide failed:", e);
       }
@@ -1045,7 +1045,7 @@ export async function updateTrackers(trackers, recentExcerpt, chatId) {
     const hashes = getTrackerHashes();
 
     for (const update of updates) {
-      if (!update?.uid || !update?.content) continue;
+      if (update?.uid === undefined || update?.uid === null || !update?.content) continue;
 
       const tracker = trackerMap.get(Number(update.uid));
       if (!tracker) continue;
@@ -1065,6 +1065,11 @@ export async function updateTrackers(trackers, recentExcerpt, chatId) {
           `[TunnelVision] Tracker "${tracker.title}" (UID ${tracker.uid}) was modified externally — rebasing post-turn update on latest saved content`,
         );
         setTrackerHash(tracker.book, tracker.uid, currentHash);
+        result.staleSkips.push({
+          uid: tracker.uid,
+          book: tracker.book,
+          title: tracker.title,
+        });
       }
 
       // Large-update guard: flag updates that change >60% of content
@@ -1570,9 +1575,22 @@ async function rollbackLastPostTurn() {
 
 // ── Event Handlers ───────────────────────────────────────────────
 
-function onAiMessageReceived() {
+function onAiMessageReceived(messageId, type) {
   const settings = getSettings();
   if (!settings.postTurnEnabled || settings.globalEnabled === false) return;
+
+  // continue/append/first_message/command generations reuse or extend the
+  // last message rather than swiping it — the length-based heuristic below
+  // would misdetect them as swipes. Only 'swipe' should be treated as a swipe.
+  if (
+    type === "continue" ||
+    type === "append" ||
+    type === "appendFinal" ||
+    type === "first_message" ||
+    type === "command"
+  ) {
+    return;
+  }
 
   const chatId = getChatId();
 
@@ -1595,7 +1613,7 @@ function onAiMessageReceived() {
     _chatRef.lastChatLength = Math.max(chatLength - 1, 0);
   }
 
-  const isSwipe = chatLength > 0 && chatLength <= _chatRef.lastChatLength;
+  const isSwipe = type === "swipe";
 
   if (isSwipe) {
     _chatRef.lastChatLength = chatLength;

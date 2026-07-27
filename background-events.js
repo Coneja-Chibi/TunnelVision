@@ -168,6 +168,9 @@ let _nextTaskId = 0;
 /** @type {Map<number, FailedTask>} */
 const _failedTasks = new Map();
 let _nextFailedTaskId = 0;
+// Retained failure entries each pin a retryFn closure over chat/prompt state.
+// There is no bound UI to drain this map on its own, so cap it defensively.
+const MAX_FAILED_TASKS = 10;
 
 /**
  * @typedef {Object} BackgroundTask
@@ -239,6 +242,11 @@ export function registerBackgroundTask({ label, icon: taskIcon = 'fa-gear', colo
                     retryFn,
                     retrying: false,
                 });
+                // Drop the oldest entries beyond the cap (Map preserves insertion order).
+                while (_failedTasks.size > MAX_FAILED_TASKS) {
+                    const oldestKey = _failedTasks.keys().next().value;
+                    _failedTasks.delete(oldestKey);
+                }
             }
             _refreshTasksUI?.();
         },
@@ -304,6 +312,16 @@ export async function retryFailedTask(failedId) {
 /** Dismiss a failed task without retrying. */
 export function dismissFailedTask(failedId) {
     _failedTasks.delete(failedId);
+    _refreshTasksUI?.();
+}
+
+/**
+ * Clear all failed-task entries. Called on chat change so retry closures
+ * captured against the previous chat's state don't linger indefinitely.
+ */
+export function clearFailedTasks() {
+    if (_failedTasks.size === 0) return;
+    _failedTasks.clear();
     _refreshTasksUI?.();
 }
 

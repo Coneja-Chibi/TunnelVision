@@ -746,7 +746,9 @@ export function isTrackerTitle(title) {
     return TRACKER_TITLE_PREFIX.test(String(title || '').trim());
 }
 
-const SUMMARY_TITLE_PREFIX = /^\[(?:scene\s+)?summary[^\]]*\]/i;
+// Matches [Summary], [Scene Summary], [Act Summary], [Act Summary — ...] and
+// [Story Summary] — the titles summary-hierarchy.js actually creates.
+const SUMMARY_TITLE_PREFIX = /^\[(?:(?:scene|act|story)\s+)?summary[^\]]*\]/i;
 
 export function isSummaryTitle(title) {
     return SUMMARY_TITLE_PREFIX.test(String(title || '').trim());
