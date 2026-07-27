@@ -3,17 +3,28 @@
  * Allows the model to create new lorebook entries mid-generation.
  * The entry is saved to the lorebook and automatically assigned to a tree node.
  *
- * Duplicate detection uses trigram similarity — fast character n-gram overlap
- * that catches morphological variants and near-duplicates without needing vectors.
+ * Duplicate detection prefers embedding cosine when an embedding profile is
+ * configured, since character overlap cannot see a duplicate that was reworded.
+ * It falls back to trigram similarity — fast character n-gram overlap that
+ * catches morphological variants — when no embedding endpoint is available, or
+ * if embedding fails.
+ *
+ * Each metric has its own threshold: `vectorDedupThreshold` (cosine, default
+ * 0.85) and `trigramDedupThreshold` (Jaccard, default 0.6). They are not
+ * interchangeable — 0.85 cosine means "these mean the same thing", while 0.85
+ * trigram means "these are nearly the same string".
+ *
  * The warning is non-blocking: the entry is always saved regardless of duplicates found.
  */
 
 import { loadWorldInfo } from '../../../../world-info.js';
 import { getSettings } from '../tree-store.js';
+import { isEmbeddingAvailable, findSimilarByEmbedding } from '../embedding-cache.js';
 import { createEntry } from '../entry-manager.js';
 import { getWritableBooks, resolveTargetBook, getBookListWithDescriptions } from '../tool-registry.js';
 import { getLanguageInstruction } from '../agent-utils.js';
 import { SECRET_AUTHORING_INSTRUCTION } from '../shared-utils.js';
+import { TOOL_NAME as UPDATE_TOOL_NAME } from './update.js';
 
 export const TOOL_NAME = 'TunnelVision_Remember';
 export const COMPACT_DESCRIPTION = 'Save a new fact, character detail, relationship, or world-building info to long-term memory.';
@@ -57,6 +68,34 @@ function trigramSimilarity(a, b) {
 }
 
 // ─── Dedup ──────────────────────────────────────────────────────
+
+/**
+ * Find similar entries by embedding cosine — catches reworded duplicates that
+ * character-trigram overlap cannot ("Keppler's Drift" vs "Keppler's Drift as a
+ * Potential Destination" share little literal text but describe one subject).
+ *
+ * Delegates to embedding-cache.js so entry vectors are shared with the smart
+ * context pipeline: same two-tier cache, same content-hash invalidation, so a
+ * Remember call costs one embedding for the new text rather than re-embedding
+ * the whole book.
+ * @param {string} bookName
+ * @param {string} newContent
+ * @param {string} newTitle
+ * @param {number} threshold - 0-1 cosine threshold
+ * @returns {Promise<Array<{uid: number, comment: string, similarity: number}>>}
+ */
+async function findSimilarEntriesSemantic(bookName, newContent, newTitle, threshold) {
+    const bookData = await loadWorldInfo(bookName);
+    if (!bookData?.entries) return [];
+
+    const candidates = Object.keys(bookData.entries)
+        .map(key => bookData.entries[key])
+        .filter(entry => !entry.disable && (entry.content || entry.comment))
+        .map(entry => ({ entry, bookName }));
+    if (candidates.length === 0) return [];
+
+    return findSimilarByEmbedding(candidates, `${newTitle} ${newContent}`, threshold);
+}
 
 /**
  * Find similar entries in a lorebook using trigram similarity.
@@ -137,6 +176,10 @@ Save entries to the lorebook where they belong based on the descriptions above. 
                     type: 'string',
                     description: 'Optional tree node ID to file this entry under. Omit to place at the root level.',
                 },
+                force: {
+                    type: 'boolean',
+                    description: 'Save even if this closely matches an existing entry. Only set this after being shown near-duplicates and deciding the new information is genuinely distinct — otherwise prefer updating the existing entry.',
+                },
             },
             required: ['lorebook', 'title', 'content'],
         },
@@ -148,20 +191,55 @@ Save entries to the lorebook where they belong based on the descriptions above. 
             const { book: lorebook, error } = resolveTargetBook(args.lorebook, { checkWrite: true });
             if (error) return error;
 
-            // Dedup check (non-blocking — warns but still saves)
+            // Dedup check (non-blocking — warns but still saves).
+            //
+            // Two metrics, two thresholds. `vectorDedupThreshold` (0.85) is a
+            // COSINE threshold: as trigram-Jaccard it means "nearly the same
+            // string", which reworded duplicates never reach — so applying it to
+            // the trigram path made the check silently inert. Use embeddings when
+            // an embedding profile is configured; fall back to trigram at its own,
+            // looser default otherwise.
             let dedupWarning = '';
             const settings = getSettings();
             if (settings.enableVectorDedup) {
-                const threshold = settings.vectorDedupThreshold || 0.85;
-                const matches = await findSimilarEntries(
-                    lorebook, args.content, args.title, threshold,
-                );
+                let matches = [];
+                let metric = 'trigram';
+                if (isEmbeddingAvailable()) {
+                    const threshold = settings.vectorDedupThreshold || 0.85;
+                    try {
+                        matches = await findSimilarEntriesSemantic(
+                            lorebook, args.content, args.title, threshold,
+                        );
+                        metric = 'embedding';
+                    } catch (e) {
+                        // A dedup failure must never cost the caller their memory.
+                        console.warn('[TunnelVision] Embedding dedup failed, falling back to trigram:', e);
+                    }
+                }
+                if (metric === 'trigram') {
+                    const threshold = settings.trigramDedupThreshold || 0.6;
+                    matches = await findSimilarEntries(
+                        lorebook, args.content, args.title, threshold,
+                    );
+                }
                 if (matches.length > 0) {
                     const lines = matches.map(
                         m => `  - "${m.comment}" (UID ${m.uid}, ${m.similarity}% match)`,
                     );
+                    console.log(`[TunnelVision] Dedup (${metric}): ${matches.length} similar entries for "${args.title}"`);
+
+                    // 'redirect' declines the write and hands back the UIDs, so the
+                    // model has to choose Update. Advisory text appended AFTER a
+                    // successful save is ignored in practice — the entry already
+                    // exists by the time the model reads it, and nothing makes it
+                    // go back. `force` is the escape hatch for a genuine near-miss.
+                    const mode = settings.rememberDedupMode || 'warn';
+                    if (mode === 'redirect' && !args.force) {
+                        return `Not saved — "${args.title}" closely matches existing entries:\n${lines.join('\n')}\n`
+                            + `Use ${UPDATE_TOOL_NAME} with the correct UID to revise or extend one of them. `
+                            + `If this really is distinct information, call this tool again with force=true.`;
+                    }
                     dedupWarning = `\n⚠ Similar entries found:\n${lines.join('\n')}\nConsider using the Update tool instead if this is the same information.`;
-                    console.log(`[TunnelVision] Dedup: ${matches.length} similar entries for "${args.title}"`);
                 }
             }
 

@@ -36,6 +36,7 @@ import {
 } from './tree-store.js';
 import { buildTreeFromMetadata, buildTreeWithLLM, generateSummariesForTree, ingestChatMessages } from './tree-builder.js';
 import { testSidecarConnectivity, testEmbeddingConnectivity } from './llm-sidecar.js';
+import { isEmbeddingAvailable } from './embedding-cache.js';
 import { registerTools, unregisterTools, getDefaultToolDescriptions, stripDynamicContent } from './tool-registry.js';
 import { runDiagnostics } from './diagnostics.js';
 import { clearRetrievalPrompt } from './sidecar-retrieval.js';
@@ -156,6 +157,8 @@ export function bindUIEvents() {
     // Vector dedup toggle + threshold
     $('#tv_vector_dedup').on('change', onVectorDedupToggle);
     $('#tv_dedup_threshold').on('change', onDedupThresholdChange);
+    $('#tv_trigram_threshold').on('change', onTrigramThresholdChange);
+    $('#tv_remember_dedup_mode').on('change', onRememberDedupModeChange);
 
     // Chat ingest
     $('#tv_ingest_chat').on('click', onIngestChat);
@@ -370,6 +373,10 @@ export function refreshUI() {
     $('#tv_vector_dedup').prop('checked', dedupEnabled);
     $('#tv_dedup_threshold_row').toggle(dedupEnabled);
     $('#tv_dedup_threshold').val(settings.vectorDedupThreshold ?? 0.85);
+    $('#tv_trigram_threshold_row').toggle(dedupEnabled);
+    $('#tv_trigram_threshold').val(settings.trigramDedupThreshold ?? 0.6);
+    $('#tv_dedup_mode_row').toggle(dedupEnabled);
+    $('#tv_remember_dedup_mode').val(settings.rememberDedupMode || 'warn');
     updateDedupStatus(dedupEnabled);
 
     // Sync mandatory tool calls & prompt injection
@@ -776,6 +783,8 @@ function onVectorDedupToggle() {
     settings.enableVectorDedup = enabled;
     saveSettingsDebounced();
     $('#tv_dedup_threshold_row').toggle(enabled);
+    $('#tv_trigram_threshold_row').toggle(enabled);
+    $('#tv_dedup_mode_row').toggle(enabled);
     updateDedupStatus(enabled);
 }
 
@@ -786,6 +795,25 @@ function onDedupThresholdChange() {
 
     const settings = getSettings();
     settings.vectorDedupThreshold = clamped;
+    saveSettingsDebounced();
+}
+
+function onTrigramThresholdChange() {
+    // Deliberately allows lower values than the cosine threshold: trigram overlap
+    // at 0.85 means "nearly the same string", which reworded duplicates never reach.
+    const raw = Number($('#tv_trigram_threshold').val());
+    const clamped = Math.min(Math.max(raw, 0.2), 0.99);
+    $('#tv_trigram_threshold').val(clamped);
+
+    const settings = getSettings();
+    settings.trigramDedupThreshold = clamped;
+    saveSettingsDebounced();
+}
+
+function onRememberDedupModeChange() {
+    const mode = $('#tv_remember_dedup_mode').val() === 'redirect' ? 'redirect' : 'warn';
+    const settings = getSettings();
+    settings.rememberDedupMode = mode;
     saveSettingsDebounced();
 }
 
@@ -801,7 +829,11 @@ function updateDedupStatus(enabled) {
         return;
     }
     $status.show();
-    $text.text('Using trigram similarity — fast character n-gram matching that catches near-duplicates and morphological variants.');
+    // Name the metric actually in use — the two behave very differently, and a
+    // reworded duplicate only gets caught on the embedding path.
+    $text.text(isEmbeddingAvailable()
+        ? 'Using embedding similarity via the Embedding Sidecar — catches reworded duplicates.'
+        : 'Using trigram similarity — character n-gram matching. Catches near-identical text only; configure an Embedding Sidecar to catch reworded duplicates.');
 }
 
 // ─── Tree Building ───────────────────────────────────────────────
