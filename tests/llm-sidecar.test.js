@@ -73,9 +73,12 @@ describe('getSidecarConfig', () => {
         expect(getSidecarConfig()).toBeNull();
     });
 
-    it('returns null when apiKey is empty', () => {
-        mockSidecarProfile = { enabled: true, endpoint: 'https://example.com', apiKey: '', model: '', format: 'openai' };
-        expect(getSidecarConfig()).toBeNull();
+    it('returns a config when apiKey is empty (local endpoints need no auth)', () => {
+        mockSidecarProfile = { enabled: true, endpoint: 'http://127.0.0.1:5001/v1', apiKey: '', model: '', format: 'openai' };
+        const config = getSidecarConfig();
+        expect(config).not.toBeNull();
+        expect(config.endpoint).toBe('http://127.0.0.1:5001/v1');
+        expect(config.apiKey).toBe('');
     });
 
     it('returns structured config for valid profile', () => {
@@ -148,9 +151,9 @@ describe('isSidecarConfigured', () => {
         expect(isSidecarConfigured()).toBe(false);
     });
 
-    it('returns false when apiKey is missing', () => {
-        mockSidecarProfile = { enabled: true, endpoint: 'https://example.com' };
-        expect(isSidecarConfigured()).toBe(false);
+    it('returns true when apiKey is missing (local endpoints need no auth)', () => {
+        mockSidecarProfile = { enabled: true, endpoint: 'http://127.0.0.1:5001/v1' };
+        expect(isSidecarConfigured()).toBe(true);
     });
 
     it('returns false when not enabled', () => {
@@ -235,6 +238,23 @@ describe('sidecarGenerate', () => {
         const body = JSON.parse(opts.body);
         expect(body.model).toBe('gpt-4o-mini');
         expect(body.messages).toEqual([{ role: 'user', content: 'hello' }]);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('omits the Authorization header when apiKey is empty', async () => {
+        mockSidecarProfile = { ...validProfile, apiKey: '' };
+        const mockFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+        });
+        vi.stubGlobal('fetch', mockFetch);
+
+        await sidecarGenerate({ prompt: 'hello' });
+
+        const [, opts] = mockFetch.mock.calls[0];
+        expect(opts.headers).not.toHaveProperty('Authorization');
+        expect(opts.headers['Content-Type']).toBe('application/json');
 
         vi.unstubAllGlobals();
     });

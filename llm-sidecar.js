@@ -66,7 +66,9 @@ export function isCircuitOpen() {
 // ─── Config Resolution ──────────────────────────────────────────────
 
 /**
- * Resolve the sidecar generation config from settings.
+ * Resolve the sidecar generation config from settings. apiKey may be empty
+ * (local endpoints such as llama.cpp, KoboldCpp, Ollama and LM Studio serve
+ * an OpenAI-compatible API with no auth), so only the endpoint is required.
  * @returns {{endpoint:string, apiKey:string, model:string, format:string, maxTokens:number, temperature:number}|null}
  */
 export function getSidecarConfig() {
@@ -75,7 +77,7 @@ export function getSidecarConfig() {
     if (!p.enabled) return null;
     const endpoint = String(p.endpoint || '').trim();
     const apiKey = String(p.apiKey || '').trim();
-    if (!endpoint || !apiKey) return null;
+    if (!endpoint) return null;
     return {
         endpoint,
         apiKey,
@@ -197,7 +199,11 @@ export async function sidecarGenerate({ prompt, systemPrompt }) {
 
 async function _callOpenAI({ endpoint, apiKey, model, systemPrompt, prompt, temperature, maxTokens }) {
     const url = _normalizeChatEndpoint(endpoint);
-    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+    const headers = { 'Content-Type': 'application/json' };
+    // Omitted rather than sent empty: `Bearer ` with no credential is malformed,
+    // and a gateway in front of a local server may reject it on that basis.
+    // Matches _embedOpenAI, which already sets the header conditionally.
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     if (/openrouter\.ai/i.test(url)) {
         headers['HTTP-Referer'] = (typeof window !== 'undefined' && window.location?.origin) || 'https://sillytavern.app';
         headers['X-Title'] = 'TunnelVision';
