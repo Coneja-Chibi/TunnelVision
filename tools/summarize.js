@@ -335,6 +335,9 @@ When you notice related events forming a pattern or storyline, group them into "
                     keys,
                     nodeId: targetNodeId,
                     tv_tracker: args.tv_tracker,
+                    // Same rule as the interval/slash-command path: a summary stands
+                    // in for messages that get hidden, so it must always be present.
+                    constant: true,
                 });
                 markAutoSummaryComplete();
                 let response = `Summarized: "${args.title}" (UID ${result.uid}) → "${result.nodeLabel}" in "${lorebook}". Significance: ${significance}.`;

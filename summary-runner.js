@@ -93,10 +93,11 @@ function parseJSON(text) {
 /**
  * Build the keyword set for a summary entry.
  *
- * ⚠️ A non-constant lorebook entry with no keys can NEVER be injected — it is a
- * dead entry that still occupies the book and reads as a stored memory. The
- * slash command used to create exactly that (`keys: []`). This guarantees at
- * least one usable key.
+ * TunnelVision's own retrieval is tree-based, so its entries do not rely on
+ * SillyTavern's keyword matcher — but keys are still what makes an entry
+ * findable by cross-book search, and what keeps the lorebook useful if the
+ * extension is ever disabled. The slash command used to pass `keys: []`.
+ * This guarantees at least one usable key.
  *
  * @param {string[]|undefined} participants
  * @param {string} title
@@ -189,6 +190,13 @@ Return JSON:
             comment: title,
             keys: buildSummaryKeys(participants, parsed.title, significance),
             nodeId,
+            // ⚠️ Summaries are ALWAYS-ON by design. This entry stands in for chat
+            // messages that have just been hidden, so it has to be present every
+            // turn — a keyword-triggered summary that fails to fire would mean the
+            // scene is gone from context with nothing in its place. Being constant
+            // also brings it inside isStaticEntry()'s protection, so background
+            // automation will not rewrite the record of what happened.
+            constant: true,
         });
     } catch (e) {
         return { ok: false, reason: `Failed to save summary: ${e.message}` };
