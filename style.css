@@ -1332,6 +1332,24 @@
     100% { opacity: 0.6; transform: scale(1); }
 }
 
+/* Indicates a background task (post-turn, world-state, lifecycle) is running */
+.tv-float-bg-active {
+    border-color: rgba(108, 92, 231, 0.7) !important;
+    box-shadow: 0 0 14px rgba(108, 92, 231, 0.35) !important;
+    animation: tv-bg-spin 1.2s linear infinite;
+}
+
+.tv-float-bg-active > i {
+    animation: tv-sidecar-icon-pulse 1.2s ease-in-out infinite;
+    color: #6c5ce7 !important;
+}
+
+@keyframes tv-bg-spin {
+    0%   { box-shadow: 0 0 8px rgba(108, 92, 231, 0.2); }
+    50%  { box-shadow: 0 0 18px rgba(108, 92, 231, 0.5); }
+    100% { box-shadow: 0 0 8px rgba(108, 92, 231, 0.2); }
+}
+
 /* Panel */
 .tv-float-panel {
     position: fixed;

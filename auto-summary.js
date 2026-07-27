@@ -11,6 +11,7 @@ import { getSettings } from './tree-store.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
 
 const TV_AUTOSUMMARY_KEY = 'tunnelvision_autosummary';
+const TV_AUTOSUMMARY_COUNTER_KEY = 'tunnelvision_autosummary_counter';
 
 /** Message count since last summary, keyed by chatId */
 const counters = new Map();
@@ -21,6 +22,10 @@ let _autoSummaryInitialized = false;
 export function initAutoSummary() {
     if (_autoSummaryInitialized) return;
     _autoSummaryInitialized = true;
+
+    // Restore the counter for whatever chat is already loaded (CHAT_CHANGED
+    // may not fire again for a chat that was loaded before this ran).
+    hydrateCounterFromMetadata();
 
     // Count user+AI messages
     if (event_types.MESSAGE_RECEIVED) {
@@ -57,6 +62,7 @@ function onMessageReceived() {
 
     const count = (counters.get(chatId) || 0) + 1;
     counters.set(chatId, count);
+    persistCounter(chatId, count);
 }
 
 function onGenerationForAutoSummary() {
@@ -100,11 +106,38 @@ function onGenerationForAutoSummary() {
 }
 
 function onChatChanged() {
+    hydrateCounterFromMetadata();
     clearPrompt();
 }
 
 function clearPrompt() {
     setExtensionPrompt(TV_AUTOSUMMARY_KEY, '', extension_prompt_types.IN_PROMPT, 0);
+}
+
+/**
+ * Persist the message counter to this chat's metadata so it survives a
+ * page reload or chat switch-away-and-back instead of resetting to 0.
+ */
+function persistCounter(chatId, count) {
+    try {
+        const context = getContext();
+        if (!context.chatMetadata || context.chatId !== chatId) return;
+        context.chatMetadata[TV_AUTOSUMMARY_COUNTER_KEY] = count;
+        context.saveMetadataDebounced();
+    } catch { /* no active chat */ }
+}
+
+/** Restore the in-memory counter for the active chat from its metadata. */
+function hydrateCounterFromMetadata() {
+    const chatId = getChatId();
+    if (!chatId) return;
+    try {
+        const context = getContext();
+        const stored = context.chatMetadata?.[TV_AUTOSUMMARY_COUNTER_KEY];
+        if (typeof stored === 'number' && Number.isFinite(stored)) {
+            counters.set(chatId, stored);
+        }
+    } catch { /* no active chat */ }
 }
 
 export function markAutoSummaryComplete() {
@@ -113,6 +146,7 @@ export function markAutoSummaryComplete() {
 
     counters.set(chatId, 0);
     pendingSummaries.delete(chatId);
+    persistCounter(chatId, 0);
     clearPrompt();
 }
 
@@ -130,5 +164,6 @@ export function resetAutoSummaryCount() {
 
     counters.set(chatId, 0);
     pendingSummaries.delete(chatId);
+    persistCounter(chatId, 0);
     clearPrompt();
 }

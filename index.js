@@ -18,7 +18,7 @@
  *   auto-summary.js — Automatic summary injection every N messages.
  */
 
-import { eventSource, event_types, extension_prompt_types, extension_prompt_roles, setExtensionPrompt, saveSettingsDebounced, main_api } from '../../../../script.js';
+import { eventSource, event_types, extension_prompt_types, extension_prompt_roles, setExtensionPrompt, saveSettingsDebounced, saveChatConditional, main_api } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
@@ -32,7 +32,7 @@ import { initActivityFeed } from './activity-feed.js';
 import { initCommands } from './commands.js';
 import { initAutoSummary } from './auto-summary.js';
 import { initPostTurnProcessor } from './post-turn-processor.js';
-import { runSidecarRetrieval } from './sidecar-retrieval.js';
+import { runSidecarRetrieval, clearRetrievalPrompt } from './sidecar-retrieval.js';
 import { runSidecarWriter, revertMessageSnapshots, revertInvalidSnapshots, hydrateSnapshots } from './sidecar-writer.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { loadWorldInfo, saveWorldInfo, world_names, deleteWorldInfoEntry, deleteWIOriginalDataValue } from '../../../world-info.js';
@@ -168,10 +168,9 @@ async function init() {
     // Post-generation sidecar writer (remember/update after model responds)
     if (event_types.MESSAGE_RECEIVED) {
         eventSource.on(event_types.MESSAGE_RECEIVED, async (messageIndexOrId, type) => {
-            const context = getContext();
-            // Robust lookup: could be index or UID
-            const msg = context.chat[messageIndexOrId] || context.chat.find(m => m.mesId === messageIndexOrId);
-            const realMsgId = msg?.mesId;
+            // ST's ChatMessage has no `mesId` field (it only exists as a DOM
+            // attribute); MESSAGE_RECEIVED already passes the chat array index.
+            const realMsgId = messageIndexOrId;
 
             // If swiped, cleanup old memories and revert updates from the previous response
             if (type === 'swipe') {
@@ -197,21 +196,18 @@ async function init() {
         });
     }
 
-    // Refresh connection profile dropdown when profiles change
-    if (event_types.CONNECTION_PROFILE_CREATED) {
-        eventSource.on(event_types.CONNECTION_PROFILE_CREATED, () => refreshUI());
-    }
-    if (event_types.CONNECTION_PROFILE_DELETED) {
-        eventSource.on(event_types.CONNECTION_PROFILE_DELETED, () => refreshUI());
-    }
-    if (event_types.CONNECTION_PROFILE_UPDATED) {
-        eventSource.on(event_types.CONNECTION_PROFILE_UPDATED, () => refreshUI());
-    }
+    // Connection profile changes already trigger a refresh via the
+    // refreshEvents loop above (CONNECTION_PROFILE_CREATED/DELETED/UPDATED
+    // → queueStateRefresh → refreshRuntimeState → refreshUI); a second,
+    // direct registration here would double-run refreshUI() per event.
 
     console.log('[TunnelVision] Extension loaded');
 }
 
 async function onChatChanged() {
+    // A stale sidecar retrieval injection from the previous chat must not
+    // leak into the newly loaded one.
+    clearRetrievalPrompt(getSettings());
     // Auto-enable pattern-matched lorebooks FIRST so the migration below sees them
     // in getActiveTunnelVisionBooks() (autoDetect mutates the active-book set).
     autoDetectLorebooks();
@@ -309,9 +305,11 @@ async function refreshRuntimeState(reason = 'state changed') {
 // ─── WI Editor Condition Injector ────────────────────────────────
 
 let _wiCondInjecting = false;
+let _wiCondIntervalId = null;
 
 function initWIConditionInjector() {
-    setInterval(async () => {
+    if (_wiCondIntervalId !== null) return;
+    _wiCondIntervalId = setInterval(async () => {
         if (_wiCondInjecting) return;
         const settings = getSettings();
         if (!settings.conditionalTriggersEnabled) return;
@@ -790,13 +788,16 @@ function cleanOrphanedToolInvocations() {
         if (!last.is_system || !Array.isArray(last.extra?.tool_invocations)) break;
 
         // This is an orphaned tool_invocations message at the tail -- remove it
-        console.debug(`[TunnelVision] Removing orphaned tool_invocations message at index ${chat.length - 1} (tools: ${last.extra.tool_invocations.map(i => i.name).join(', ')})`);
-        chat.length = chat.length - 1;
+        const index = chat.length - 1;
+        console.debug(`[TunnelVision] Removing orphaned tool_invocations message at index ${index} (tools: ${last.extra.tool_invocations.map(i => i.name).join(', ')})`);
+        document.querySelector(`#chat .mes[mesid="${index}"]`)?.remove();
+        chat.length = index;
         removed++;
     }
 
     if (removed > 0) {
         console.log(`[TunnelVision] Removed ${removed} orphaned tool_invocations message(s) from chat tail`);
+        saveChatConditional();
     }
 }
 
@@ -889,7 +890,7 @@ function onChatCompletionSettingsReady(data) {
 
     // ── Final-pass tool stripping ────────────────────────────────────
     const recurseLimit = ToolManager.RECURSE_LIMIT ?? 5;
-    if (_toolRecursionDepth >= recurseLimit - 1) {
+    if (recurseLimit > 1 && _toolRecursionDepth >= recurseLimit - 1) {
         if (data.tools) {
             delete data.tools;
         }
@@ -1066,6 +1067,10 @@ async function onGenerationStarted(type, opts, dryRun) {
 // Debounce timer for sidecar writer in group chats — prevents firing
 // once per group member by waiting for the last MESSAGE_RECEIVED.
 let _sidecarWriterDebounceTimer = null;
+// Re-entrancy guard: prevents overlapping runSidecarWriter() invocations when
+// MESSAGE_RECEIVED fires again (e.g. a fast follow-up message) while a
+// previous writer run is still in flight.
+let _writerRunning = false;
 
 async function onMessageReceived(messageId, type) {
     console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${messageId} type="${type}"`);
@@ -1081,13 +1086,15 @@ async function onMessageReceived(messageId, type) {
         console.error('[TunnelVision] Failed to flush pending summary hide:', err);
     }
 
-    // Never run sidecar writer on swipes, continues, first messages, or non-generation events.
-    // Only run on normal 'normal' generation completions.
-    const skipTypes = ['swipe', 'continue', 'appendFinal', 'first_message', 'command', 'extension'];
+    // Never run sidecar writer on swipes, continues, first messages, regenerations,
+    // or non-generation events. Only run on normal 'normal' generation completions.
+    const skipTypes = ['swipe', 'continue', 'appendFinal', 'first_message', 'command', 'extension', 'regenerate'];
     if (skipTypes.includes(type)) return;
 
     const settings = getSettings();
     if (!settings.sidecarPostGenWriter || settings.globalEnabled === false) return;
+
+    if (_writerRunning) return;
 
     // In group chats, debounce: wait 800ms after the last MESSAGE_RECEIVED
     // before firing the sidecar writer, so we only run once after the
@@ -1097,19 +1104,26 @@ async function onMessageReceived(messageId, type) {
         if (_sidecarWriterDebounceTimer) clearTimeout(_sidecarWriterDebounceTimer);
         _sidecarWriterDebounceTimer = setTimeout(async () => {
             _sidecarWriterDebounceTimer = null;
+            if (_writerRunning) return;
+            _writerRunning = true;
             try {
                 await runSidecarWriter();
             } catch (err) {
                 console.error('[TunnelVision] Sidecar post-gen writer error (group):', err);
+            } finally {
+                _writerRunning = false;
             }
         }, 800);
         return;
     }
 
+    _writerRunning = true;
     try {
         await runSidecarWriter(messageId);
     } catch (err) {
         console.error('[TunnelVision] Sidecar post-gen writer error:', err);
+    } finally {
+        _writerRunning = false;
     }
 }
 

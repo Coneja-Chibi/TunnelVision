@@ -24,7 +24,7 @@ import {
     getAllEntryUids,
     getSettings,
 } from './tree-store.js';
-import { getReadableBooks, getWritableBooks, getBookListWithDescriptions, checkToolConfirmation, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME } from './tool-registry.js';
+import { getReadableBooks, getWritableBooks, getBookListWithDescriptions, checkToolConfirmation, resolveTargetBook, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME } from './tool-registry.js';
 import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { getDefinition as getRememberDef } from './tools/remember.js';
 import { getDefinition as getUpdateDef } from './tools/update.js';
@@ -96,8 +96,13 @@ async function takeSnapshots(snapshotKey, ops) {
     };
 
     for (const op of ops) {
-        if (!op.lorebook) continue;
-        const bookData = await loadWorldInfo(op.lorebook);
+        // op.lorebook may be unset when the sidecar leaves book selection to
+        // auto-resolution — resolve it the same way the tool actions will,
+        // otherwise we silently skip the snapshot for the book that actually
+        // gets mutated and revertMessageSnapshots has nothing to restore.
+        const { book: lorebook } = resolveTargetBook(op.lorebook);
+        if (!lorebook) continue;
+        const bookData = await loadWorldInfo(lorebook);
         if (!bookData?.entries) continue;
 
         if (op.type === 'update' || op.type === 'merge' || op.type === 'forget' || op.type === 'split') {
@@ -106,19 +111,19 @@ async function takeSnapshots(snapshotKey, ops) {
                 if (uid === undefined) continue;
                 const entry = findEntryByUid(bookData.entries, uid);
                 if (entry) {
-                    const key = `${op.lorebook}:${uid}`;
+                    const key = `${lorebook}:${uid}`;
                     if (!snapshots.modifiedEntries[key]) {
                         snapshots.modifiedEntries[key] = JSON.parse(JSON.stringify(entry));
                     }
                 }
             }
         }
-        
+
         // Always snapshot the tree state if we might change it
-        if (!snapshots.treeState[op.lorebook]) {
-            const tree = getTree(op.lorebook);
+        if (!snapshots.treeState[lorebook]) {
+            const tree = getTree(lorebook);
             if (tree?.root) {
-                snapshots.treeState[op.lorebook] = JSON.parse(JSON.stringify(tree.root));
+                snapshots.treeState[lorebook] = JSON.parse(JSON.stringify(tree.root));
             }
         }
     }
@@ -880,7 +885,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                 const approved = await checkToolConfirmation(toolName, op);
                 if (!approved) {
                     console.log(`[TunnelVision] Sidecar write denied by user: ${op.type} "${op.title || op.uid || ''}"`)
-                    results.push({ op, success: false, result: 'Denied by user' });
+                    results.push(`FAIL [${op.type}]: Denied by user`);
                     failed++;
                     continue;
                 }

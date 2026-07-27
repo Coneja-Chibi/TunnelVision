@@ -1,3 +1,5 @@
+/* @vitest-environment jsdom */
+
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const getMockState = () => globalThis.__tvDiagnosticsMockState;
@@ -20,7 +22,16 @@ vi.mock('../tree-store.js', () => ({
         return result;
     }),
     findNodeById: vi.fn(() => null),
-    getSettings: vi.fn(() => getMockState().settings),
+    // Real getSettings() backfills missing keys via ensureSettings() — mirror that
+    // here (in place, preserving object identity) so tests that don't set
+    // enabledLorebooks/trees explicitly don't crash, while mutations diagnostics.js
+    // makes to settings.trackerUids etc. are still visible on state.settings.
+    getSettings: vi.fn(() => {
+        const settings = getMockState().settings;
+        if (settings.enabledLorebooks === undefined) settings.enabledLorebooks = {};
+        if (settings.trees === undefined) settings.trees = {};
+        return settings;
+    }),
     saveTree: vi.fn((bookName, tree) => {
         getMockState().savedTrees.push({ bookName, tree });
     }),
@@ -75,6 +86,10 @@ vi.mock('../../../world-info.js', async () => {
         get world_names() {
             return getMockState().worldNames;
         },
+        // The aliased st-world-info.js stub's loadWorldInfo always returns
+        // `{ entries: {} }` regardless of bookName, which silently makes every
+        // tracker UID look stale. Route it through the per-test lorebook fixtures.
+        loadWorldInfo: vi.fn(async (bookName) => getMockState().lorebooks.get(bookName) || null),
     };
 });
 
@@ -83,7 +98,7 @@ import { runDiagnostics } from '../diagnostics.js';
 function resetMockState() {
     globalThis.__tvDiagnosticsMockState = {
         activeBooks: [],
-        settings: { trackerUids: {} },
+        settings: { trackerUids: {}, enabledLorebooks: {}, trees: {} },
         worldNames: [],
         lorebooks: new Map(),
         savedTrees: [],

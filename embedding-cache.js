@@ -18,6 +18,7 @@ import {
   EMBEDDING_MAX_BATCH_SIZE,
   EMBEDDING_MAX_TEXT_LENGTH,
   EMBEDDING_CACHE_TTL_DAYS,
+  EMBEDDING_CACHE_MAX_RECORDS,
   EMBEDDING_SIMILARITY_BOOSTS,
 } from "./constants.js";
 
@@ -95,6 +96,7 @@ async function hydrateFromStore() {
 
   const now = Date.now();
   const staleKeys = [];
+  const liveRecords = [];
   let loaded = 0;
 
   try {
@@ -111,6 +113,7 @@ async function hydrateFromStore() {
       const contentHash = Number(parts[parts.length - 1]);
       const memKey = parts.slice(0, parts.length - 1).join(":");
       _cache.set(memKey, { embedding: record.embedding, contentHash });
+      liveRecords.push({ key, storedAt: record.storedAt || 0 });
       loaded++;
     });
   } catch (e) {
@@ -119,6 +122,17 @@ async function hydrateFromStore() {
       e.message,
     );
     return;
+  }
+
+  // Hard cap on persisted records: the TTL alone doesn't bound growth within
+  // its window (every content edit orphans the previous vector), so evict
+  // the oldest records beyond the cap too.
+  if (liveRecords.length > EMBEDDING_CACHE_MAX_RECORDS) {
+    liveRecords.sort((a, b) => a.storedAt - b.storedAt);
+    const overflow = liveRecords.length - EMBEDDING_CACHE_MAX_RECORDS;
+    for (const { key } of liveRecords.slice(0, overflow)) {
+      staleKeys.push(key);
+    }
   }
 
   if (staleKeys.length > 0) {
@@ -152,10 +166,19 @@ function getCachedEmbedding(bookName, uid, contentHash) {
 
 function setCachedEmbedding(bookName, uid, contentHash, embedding) {
   const key = getMemCacheKey(bookName, uid);
+  const previous = _cache.get(key);
   _cache.set(key, { embedding, contentHash });
 
   const store = getStore();
   if (store) {
+    // Every content edit writes a new "bookName:uid:contentHash" record —
+    // remove the record for this entry's previous content hash first so
+    // superseded vectors don't accumulate indefinitely in IndexedDB.
+    if (previous && previous.contentHash !== contentHash) {
+      store
+        .removeItem(persistKey(bookName, uid, previous.contentHash))
+        .catch(() => {});
+    }
     store
       .setItem(persistKey(bookName, uid, contentHash), {
         embedding,
