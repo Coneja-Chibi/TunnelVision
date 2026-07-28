@@ -222,686 +222,902 @@
                     <div class="tv-card-body tv-advanced-body" style="display:none;">
 
                         <!-- ═══ Auto-Detect Lorebooks ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Auto-Detect Lorebooks</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Auto-enable lorebooks whose names contain this text. Use <code>{{char}}</code> for the current character name.
-                                <br>Example: <code>TV - {{char}}</code> would auto-enable "TV - Sable" when chatting with Sable.
-                            </div>
-                            <input type="text" id="tv_auto_detect_pattern" class="text_pole" placeholder="e.g. TV - {{char}}" />
-                        </div>
 
-                        <!-- ═══ Output Language ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Output Language</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Force all TV-generated content (entries, summaries, tracker updates) to be written in this language. Leave empty to auto-match the conversation language.
+                        <div class="tv-adv-group inline-drawer">
+                            <div class="tv-adv-group-title inline-drawer-toggle inline-drawer-header">
+                                <span>Lorebooks & Tree Building</span>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
                             </div>
-                            <input type="text" id="tv_target_language" class="text_pole" placeholder="Auto (match conversation)" list="tv-lang-presets" />
-                            <datalist id="tv-lang-presets">
-                                <option value="English"></option>
-                                <option value="Japanese"></option>
-                                <option value="Korean"></option>
-                                <option value="Chinese"></option>
-                                <option value="Spanish"></option>
-                                <option value="Portuguese"></option>
-                                <option value="French"></option>
-                                <option value="German"></option>
-                                <option value="Russian"></option>
-                                <option value="Italian"></option>
-                                <option value="Thai"></option>
-                                <option value="Vietnamese"></option>
-                                <option value="Indonesian"></option>
-                                <option value="Arabic"></option>
-                                <option value="Turkish"></option>
-                                <option value="Polish"></option>
-                                <option value="Ukrainian"></option>
-                            </datalist>
-                        </div>
-
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Background LLM Instructions</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Extra system instructions for TunnelVision's background LLM calls: tree building, chat ingest, sidecar retrieval, and post-generation writing. This does not change tool descriptions in the main chat request.
-                            </div>
-                            <textarea id="tv_background_prompt_addendum" class="tv-textarea" rows="4" placeholder="Optional provider/model instructions for background TunnelVision calls."></textarea>
-                        </div>
-
-                        <!-- ═══ LLM Call Timeout ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Background LLM Call Timeout</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                How long to wait for a single background LLM call (tree building, world state, smart context, memory lifecycle, post-turn processing) before retrying. Does not affect the main chat generation.
-                            </div>
-                            <div class="tv-number-row">
-                                <input id="tv_llm_call_timeout" type="number" class="tv-number-input" min="10" max="600" step="5" value="120" />
-                                <span class="tv-number-label">seconds</span>
-                            </div>
-                        </div>
-
-                        <!-- ═══ Search Mode ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Search Mode</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                How the AI navigates your lorebook tree during generation.
-                            </div>
-                            <div class="tv-radio-group">
-                                <label class="tv-radio">
-                                    <input type="radio" name="tv_search_mode" value="traversal" checked />
-                                    <span class="tv-radio-label">Traversal <span class="tv-badge-default">Default</span></span>
-                                </label>
-                                <div class="tv-tool-desc">Step-by-step navigation. AI sees one level at a time, picks a branch, drills deeper. Uses multiple tool calls. Better for very large trees (100+ nodes) where showing everything at once would overwhelm context.</div>
-
-                                <label class="tv-radio">
-                                    <input type="radio" name="tv_search_mode" value="collapsed" />
-                                    <span class="tv-radio-label">Collapsed Tree <span class="tv-badge-recommended">Recommended</span></span>
-                                </label>
-                                <div class="tv-tool-desc">Full tree shown at once. AI sees all categories and summaries in a single view and picks directly. Uses fewer tool calls, better retrieval accuracy. Based on RAPTOR research showing collapsed-tree consistently outperforms top-down traversal.</div>
-                            </div>
-                        </div>
-
-                        <div class="tv-adv-section" id="tv_collapsed_depth_section" style="display:none;">
-                            <div class="tv-adv-section-title">Collapsed Tree Depth</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                How many levels of the tree to show in the tool description. The AI sees this many levels at once and navigates deeper with additional tool calls. Lower values = smaller tool description but more calls needed. Higher values = more visible at once but heavier on context.
-                            </div>
-                            <div class="tv-number-row">
-                                <input id="tv_collapsed_depth" type="number" class="tv-number-input" min="1" max="4" step="1" value="2" />
-                                <span class="tv-number-label">levels visible</span>
-                            </div>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                <strong>1</strong> — Top-level only. Minimal context, always needs navigate calls.<br/>
-                                <strong>2</strong> — Two levels. Good balance for most lorebooks. <span class="tv-badge-default">Default</span><br/>
-                                <strong>3-4</strong> — Deep view. Better for small-medium lorebooks where you want single-call retrieval.
-                            </div>
-                        </div>
-
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Selective Retrieval</div>
-                            <label class="tv-toggle-row">
-                                <input id="tv_selective_retrieval" type="checkbox" />
-                                <span>Show entry names first, let AI pick specific entries</span>
-                            </label>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                <strong>Off (default):</strong> When the AI reaches a leaf node, all entries are injected into context automatically. Simpler, fewer tool calls.<br/>
-                                <strong>On:</strong> When the AI reaches a leaf node, it sees a manifest of entry titles/keys instead of full content. It must then request specific entries by name. More precise retrieval — useful for large leaf nodes where only some entries are relevant — but costs an extra tool call per retrieval.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Tool Call Recursion Limit ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Tool Call Recursion Limit</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Maximum number of consecutive tool calls the AI can make per generation. SillyTavern's default is 5. Raising this allows deeper tree traversal and more tool actions per turn, but costs more API tokens. Most relevant in Traversal mode.
-                            </div>
-                            <div class="tv-number-row">
-                                <input id="tv_recurse_limit" type="number" class="tv-number-input" min="1" max="50" step="1" value="5" />
-                                <span class="tv-number-label">calls per generation</span>
-                            </div>
-                            <div class="tv-help-text tv-warn-text" id="tv_recurse_warn" style="display:none;">
-                                <i class="fa-solid fa-triangle-exclamation"></i> Values above 10 may significantly increase API costs. Each recursion sends the full context + tool results back to the API.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Prompt Injection ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Prompt Injection</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Controls where and how TunnelVision injects its prompts into the conversation. Position and depth determine where the prompt lands in the message list the AI sees.
-                            </div>
-
-                            <!-- Total Injection Budget -->
-                            <div style="margin-bottom: 12px;">
-                                <label class="tv-label" for="tv_total_injection_budget">Total Injection Budget (characters)</label>
-                                <div class="tv-number-row">
-                                    <input id="tv_total_injection_budget" type="number" class="tv-number-input" min="0" max="100000" step="500" value="0" />
-                                    <span class="tv-number-label">chars (0 = unlimited)</span>
-                                </div>
-                                <div class="tv-help-text" style="margin-top: 4px;">
-                                    Caps the combined size of the mandatory-tools, world state, smart context, and notebook prompts. When the combined text would exceed this, prompts are trimmed in priority order (mandatory &gt; world state &gt; smart context &gt; notebook). 0 disables the cap.
-                                </div>
-                            </div>
-
-                            <!-- Mandatory Tool Calls -->
-                            <div class="tv-prompt-inject-block" style="margin-bottom: 12px;">
-                                <label class="tv-checkbox-row" style="margin-bottom: 6px;">
-                                    <input id="tv_mandatory_tools" type="checkbox" />
-                                    <span><strong>Mandatory Tool Calls</strong></span>
-                                </label>
-                                <div class="tv-help-text" style="margin-bottom: 6px;">
-                                    Injects an instruction telling the AI it MUST use TunnelVision tools every generation.
-                                </div>
-                                <div id="tv_mandatory_prompt_options" style="display:none;">
-                                    <div class="tv-prompt-inject-controls" style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
-                                        <select id="tv_mandatory_position" class="tv-select" style="width: auto;">
-                                            <option value="in_chat">In Chat</option>
-                                            <option value="in_prompt">In System Prompt</option>
-                                        </select>
-                                        <div class="tv-number-row" id="tv_mandatory_depth_row" style="margin: 0;">
-                                            <label class="tv-number-label" for="tv_mandatory_depth" style="margin: 0;">Depth:</label>
-                                            <input id="tv_mandatory_depth" type="number" class="tv-number-input" min="0" max="50" step="1" value="1" style="width: 50px;" />
+                            <div class="inline-drawer-content">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Auto-Detect Lorebooks</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
                                         </div>
-                                        <select id="tv_mandatory_role" class="tv-select" style="width: auto;">
-                                            <option value="system">System</option>
-                                            <option value="user">User</option>
-                                            <option value="assistant">Assistant</option>
-                                        </select>
-                                    </div>
-                                    <textarea id="tv_mandatory_prompt_text" class="tv-textarea" rows="3" style="font-size: 0.85em;"></textarea>
-                                    <div style="text-align: right; margin-top: 4px;">
-                                        <button id="tv_mandatory_prompt_reset" class="tv-btn tv-btn-sm" title="Reset to default text">Reset</button>
-                                    </div>
-                                </div>
-                            </div>
+                                        <div class="inline-drawer-content" style="display:block;">
 
-                            <!-- Notebook Injection -->
-                            <div class="tv-prompt-inject-block">
-                                <div style="margin-bottom: 6px;"><strong>Notebook Injection</strong></div>
-                                <div class="tv-help-text" style="margin-bottom: 6px;">
-                                    Where the AI's private notebook notes are injected into context each turn.
-                                </div>
-                                <div class="tv-prompt-inject-controls" style="display: flex; gap: 8px; align-items: center;">
-                                    <select id="tv_notebook_position" class="tv-select" style="width: auto;">
-                                        <option value="in_chat">In Chat</option>
-                                        <option value="in_prompt">In System Prompt</option>
-                                    </select>
-                                    <div class="tv-number-row" id="tv_notebook_depth_row" style="margin: 0;">
-                                        <label class="tv-number-label" for="tv_notebook_depth" style="margin: 0;">Depth:</label>
-                                        <input id="tv_notebook_depth" type="number" class="tv-number-input" min="0" max="50" step="1" value="1" style="width: 50px;" />
-                                    </div>
-                                    <select id="tv_notebook_role" class="tv-select" style="width: auto;">
-                                        <option value="system">System</option>
-                                        <option value="user">User</option>
-                                        <option value="assistant">Assistant</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="tv-help-text" style="margin-top: 8px;">
-                                <strong>In Chat</strong> injects at a specific depth in the message list (0 = bottom, 1 = before last message). Better for model attention on long chats.<br/>
-                                <strong>In System Prompt</strong> places it in the story string area (depth is ignored). More stable but can get buried in long contexts.<br/>
-                                <strong>Role</strong> controls which role the injected message appears as.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Hide Tool-Call Messages ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Hide Tool-Call Messages</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                When enabled, TunnelVision tool-call messages are visually hidden in the chat. The AI still uses them normally, but the messages won't appear in the conversation. Useful for a cleaner chat experience.
-                            </div>
-                            <label class="tv-checkbox-row">
-                                <input id="tv_stealth_mode" type="checkbox" />
-                                <span>Hide tool-call messages in chat</span>
-                            </label>
-                        </div>
-
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Ephemeral Tool Results</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Strip retrieved lorebook content from older tool-call messages before each generation. This prevents past search results from accumulating in context and bloating your chat history.
-                            </div>
-                            <label class="tv-checkbox-row">
-                                <input id="tv_ephemeral_results" type="checkbox" />
-                                <span>Clear old TunnelVision results from context</span>
-                            </label>
-                            <div class="tv-help-text" style="margin-top: 4px; color: #e8a03c;">
-                                <strong>Warning:</strong> This permanently modifies chat message data. Old tool results will be replaced with a short stub and cannot be recovered. The AI will re-search for lore each turn instead of seeing past retrievals. This saves context tokens but costs more tool calls.
-                            </div>
-                            <div id="tv_ephemeral_filter_options" style="display: none; margin-top: 8px; padding-left: 4px;">
-                                <div class="tv-help-text" style="margin-bottom: 6px;">Choose which tool results get stripped. Notebook is always protected.</div>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Search" /><span>Search</span></label>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Remember" /><span>Remember</span></label>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Update" /><span>Update</span></label>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Forget" /><span>Forget</span></label>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Reorganize" /><span>Reorganize</span></label>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Summarize" /><span>Summarize</span></label>
-                                <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_MergeSplit" /><span>Merge/Split</span></label>
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ LLM Build Detail ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">LLM Build Detail Level</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                How much entry data to send when building/summarizing the tree with LLM. Applies to categorization, subdivision, and summary generation.
-                            </div>
-                            <select id="tv_llm_detail" class="tv-select">
-                                <option value="full">Full (complete untruncated content + all metadata)</option>
-                                <option value="lite" selected>Lite (content preview + keys + settings)</option>
-                                <option value="names">Names only (minimal tokens)</option>
-                            </select>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                <strong>Full</strong> sends complete untruncated entry content — best categorization but heavy on tokens. Use with large context models (80k+).<br/>
-                                <strong>Lite</strong> sends a 150-char content preview + keys, groups, and settings. Good balance of quality and cost. <span class="tv-badge-default">Default</span><br/>
-                                <strong>Names</strong> — cheapest, AI can only group by titles.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Tree Granularity ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Tree Granularity</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Controls how aggressively the LLM breaks up your entries during tree building. Higher = more categories, more sub-categories, fewer entries per node. Lower = broader groupings with more entries per node.
-                            </div>
-                            <select id="tv_tree_granularity" class="tv-select">
-                                <option value="0">Auto (scales with lorebook size)</option>
-                                <option value="1">Minimal — keep entries grouped broadly (3-5 categories)</option>
-                                <option value="2">Moderate — balanced splitting (5-8 categories)</option>
-                                <option value="3">Detailed — break up into many specific groups (8-15 categories)</option>
-                                <option value="4">Extensive — maximum splitting, tiny groups (12-20 categories)</option>
-                            </select>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                <strong>Auto</strong> scales splitting based on how many entries you have. Override if you want the tree broken up more or less than the default. Requires a tree rebuild to take effect.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ LLM Chunk Size ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">LLM Chunk Size</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Maximum characters per LLM call when categorizing entries. Large lorebooks are split into chunks of this size. The last entry in a chunk is always included in full (overfill) so entries are never cut off mid-way. Lower values = more LLM calls but safer for smaller context models.
-                            </div>
-                            <div class="tv-number-row">
-                                <input id="tv_chunk_tokens" type="number" class="tv-number-input" min="5000" max="500000" step="5000" value="30000" />
-                                <span class="tv-number-label">characters (~7,500 tokens at default)</span>
-                            </div>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                <strong>30,000</strong> chars is a safe default for most APIs (~8k tokens). Raise to <strong>100,000+</strong> for large-context models (128k+). If your lorebook fits in one chunk, no splitting occurs.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Vector Dedup ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Duplicate Detection</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                When enabled, the Remember tool checks for semantically similar existing entries before saving. If a near-duplicate is found, the AI is warned (but not blocked) — it can choose to update the existing entry instead.
-                            </div>
-                            <label class="tv-toggle">
-                                <input id="tv_vector_dedup" type="checkbox" />
-                                <span class="tv-toggle-slider"></span>
-                                <span class="tv-toggle-label">Enable duplicate detection</span>
-                            </label>
-                            <div id="tv_dedup_status" class="tv-dedup-status" style="display:none; margin-top: 6px;">
-                                <i class="fa-solid fa-circle-info"></i>
-                                <span id="tv_dedup_method_text">Checking...</span>
-                            </div>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                Uses trigram similarity — fast character n-gram matching that catches near-duplicates and morphological variants. No external dependencies needed.
-                            </div>
-                            <div id="tv_dedup_threshold_row" class="tv-number-row" style="margin-top: 8px; display: none;">
-                                <label class="tv-number-label" for="tv_dedup_threshold">Similarity threshold:</label>
-                                <input id="tv_dedup_threshold" type="number" class="tv-number-input" min="0.5" max="0.99" step="0.01" value="0.85" />
-                                <span class="tv-help-text" style="margin: 0;">(0.85 = high similarity)</span>
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Compact Tool Prompts ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-setting-row">
-                                <label class="tv-toggle">
-                                    <input id="tv_compact_tool_prompts" type="checkbox" />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Compact Tool Prompts</span>
-                                </label>
-                                <div class="tv-help-text">Reduces token usage by sending short tool descriptions with a central guide. The model can request full details on demand. Saves ~2000 tokens per generation.</div>
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Tool Toggles ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Tool Access</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Control which tools the AI can use. Disabling a tool unregisters it completely — the AI won't see it at all.
-                            </div>
-
-                            <div class="tv-tool-toggles">
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Search">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Search" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Search</span>
-                                </label>
-                                <div class="tv-tool-desc">Navigate the lorebook tree to retrieve relevant entries for the current scene.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Remember">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Remember" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Remember</span>
-                                </label>
-                                <div class="tv-tool-desc">Create new lorebook entries when important facts, character details, or world info emerge.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Summarize">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Summarize" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Summarize</span>
-                                </label>
-                                <div class="tv-tool-desc">Create scene/event summaries for long-term memory. Captures what <em>happened</em> (narrative beats, turning points), separate from what <em>exists</em> (Remember). The AI decides when a scene is worth summarizing.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Update">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Update" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Update</span>
-                                </label>
-                                <div class="tv-tool-desc">Edit existing entries when information changes or becomes outdated.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Forget">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Forget" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Forget</span>
-                                </label>
-                                <div class="tv-tool-desc">Disable or delete entries that are no longer relevant or accurate.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Reorganize">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Reorganize" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Reorganize</span>
-                                </label>
-                                <div class="tv-tool-desc">Move entries between categories or create new ones as the lorebook grows.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_MergeSplit">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_MergeSplit" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Merge/Split</span>
-                                </label>
-                                <div class="tv-tool-desc">Combine two related entries into one, or split a large entry into focused pieces.</div>
-
-                                <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Notebook">
-                                    <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Notebook" checked />
-                                    <span class="tv-toggle-slider"></span>
-                                    <span class="tv-toggle-label">Notebook</span>
-                                </label>
-                                <div class="tv-tool-desc">Private AI scratchpad. The AI writes notes to itself (plans, follow-ups, narrative threads) that persist per-chat and are injected into context every turn. Invisible in chat output.</div>
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Tool Confirmation ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Tool Confirmation</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Require your approval before the AI can execute these tools. When enabled, a popup will show what the AI wants to do and wait for you to approve or deny.
-                            </div>
-                            <div class="tv-tool-confirm-toggles">
-                                <label class="tv-checkbox-row">
-                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Remember" />
-                                    <span>Remember — creating new entries</span>
-                                </label>
-                                <label class="tv-checkbox-row">
-                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Update" />
-                                    <span>Update — modifying existing entries</span>
-                                </label>
-                                <label class="tv-checkbox-row">
-                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Forget" />
-                                    <span>Forget — disabling/deleting entries</span>
-                                </label>
-                                <label class="tv-checkbox-row">
-                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Summarize" />
-                                    <span>Summarize — creating scene summaries</span>
-                                </label>
-                                <label class="tv-checkbox-row">
-                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Reorganize" />
-                                    <span>Reorganize — moving entries between categories</span>
-                                </label>
-                                <label class="tv-checkbox-row">
-                                    <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_MergeSplit" />
-                                    <span>Merge/Split — combining or splitting entries</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Tool Prompt Overrides ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Tool Prompt Overrides</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Customize the instructions the AI sees for each tool. This controls <em>when</em> and <em>how</em> the AI decides to use each tool. Only the description text is editable — the tool's parameters and behavior cannot be changed. Leave empty to use the default prompt.
-                            </div>
-                            <div id="tv_tool_prompt_overrides" class="tv-tool-prompt-overrides">
-                                <!-- Rendered by JS -->
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Slash Commands ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Slash Commands</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Use <code>/tv-search</code>, <code>/tv-remember</code>, <code>/tv-summarize</code>,
-                                <code>/tv-forget</code>, <code>/tv-merge</code>, <code>/tv-split</code>, <code>/tv-ingest</code>
-                                in the chat box to force tool actions.
-                            </div>
-                            <div class="tv-number-row">
-                                <label class="tv-number-label" for="tv_command_context">Context messages:</label>
-                                <input id="tv_command_context" type="number" class="tv-number-input" min="5" max="500" step="5" value="50" />
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Auto-Summary ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Auto-Summary</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Automatically inject a summarize instruction every N messages. The AI will create a summary of recent events as part of its next response.
-                            </div>
-                            <label class="tv-toggle">
-                                <input id="tv_auto_summary_enabled" type="checkbox" />
-                                <span class="tv-toggle-slider"></span>
-                                <span class="tv-toggle-label">Enable auto-summary</span>
-                            </label>
-                            <div id="tv_auto_summary_options" style="display: none; margin-top: 8px;">
-                                <div class="tv-number-row">
-                                    <label class="tv-number-label" for="tv_auto_summary_interval">Interval:</label>
-                                    <input id="tv_auto_summary_interval" type="number" class="tv-number-input" min="5" max="200" step="5" value="20" />
-                                    <span class="tv-number-label">messages</span>
-                                </div>
-                                <div id="tv_auto_summary_counter" class="tv-help-text" style="margin-top: 4px;">
-                                    Messages since last summary: <strong id="tv_auto_summary_count">0</strong>
-                                </div>
-                            </div>
-                            <label class="tv-toggle" style="margin-top: 8px;">
-                                <input id="tv_auto_hide_summarized" type="checkbox" />
-                                <span class="tv-toggle-slider"></span>
-                                <span class="tv-toggle-label">Auto-hide summarized messages</span>
-                            </label>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                When enabled, messages covered by a summary are hidden from chat to save tokens. Hidden messages can be restored with /unhide.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Constant Entry Passthrough ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Constant Entry Passthrough</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Lorebook entries marked as "Constant" (always active) are normally suppressed along with all other TV-managed entries. Enable this to let constant entries pass through ST's normal injection pipeline, so they're always included in context regardless of tree search.
-                            </div>
-                            <label class="tv-toggle">
-                                <input id="tv_passthrough_constant" type="checkbox" checked />
-                                <span class="tv-toggle-slider"></span>
-                                <span class="tv-toggle-label">Let constant entries bypass TunnelVision gating</span>
-                            </label>
-                            <div class="tv-help-text" style="margin-top: 4px;">
-                                Useful for chat summaries, system rules, or other entries that should <em>always</em> be in context. These entries will still appear in the tree but won't depend on tool calls for injection.
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Keyword Trigger Passthrough ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Keyword Trigger Passthrough</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                By default, TunnelVision suppresses normal keyword triggering for managed lorebooks — entries are only injected when the AI searches for them. Enable this to let keyword triggers work alongside tree-based retrieval. Entries that fired via keywords will be marked "already in context" so the AI skips them during search.
-                            </div>
-                            <label class="tv-toggle">
-                                <input id="tv_allow_keyword_triggers" type="checkbox" />
-                                <span class="tv-toggle-slider"></span>
-                                <span class="tv-toggle-label">Allow traditional keyword triggers for TV-managed lorebooks</span>
-                            </label>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Multi-Lorebook Mode ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Multi-Lorebook Mode</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                How to present multiple active lorebooks to the AI during search.
-                            </div>
-                            <div class="tv-radio-group">
-                                <label class="tv-radio">
-                                    <input type="radio" name="tv_multi_book_mode" value="unified" checked />
-                                    <span class="tv-radio-label">Unified Tree <span class="tv-badge-default">Default</span></span>
-                                </label>
-                                <div class="tv-tool-desc">All lorebook trees merged into one view. AI sees all categories as siblings. Fewer tool calls, simpler navigation.</div>
-
-                                <label class="tv-radio">
-                                    <input type="radio" name="tv_multi_book_mode" value="per-book" />
-                                    <span class="tv-radio-label">Per-Book Navigation</span>
-                                </label>
-                                <div class="tv-tool-desc">Each lorebook shown as a separate document node. AI picks a lorebook first, then navigates its tree. Better for very different lorebooks.</div>
-                            </div>
-                        </div>
-
-                        <hr class="tv-adv-divider" />
-
-                        <!-- ═══ Sidecar LLM ═══ -->
-                        <div class="tv-adv-section">
-                            <div class="tv-adv-section-title">Sidecar LLM</div>
-                            <div class="tv-help-text" style="margin-bottom: 8px;">
-                                Direct API for TV's own LLM operations (tree building, summaries, ingest, retrieval). TV calls the endpoint you set below using its own key — no <code>allowKeysExposure</code> needed. Leave disabled to use ST's current API via generateRaw.
-                            </div>
-                            <label class="tv-toggle" style="margin-bottom: 6px;">
-                                <input id="tv_sidecar_enabled" type="checkbox" />
-                                <span class="tv-toggle-slider"></span>
-                                <span class="tv-toggle-label">Enable Sidecar LLM</span>
-                            </label>
-                            <div style="display: flex; gap: 8px; margin-bottom: 6px;">
-                                <input type="text" id="tv_sidecar_endpoint" class="tv-text-input" style="flex: 2;" placeholder="Endpoint (e.g. https://api.openai.com/v1)" />
-                                <select id="tv_sidecar_format" class="tv-select" style="flex: 1;">
-                                    <option value="openai">OpenAI-compatible</option>
-                                    <option value="anthropic">Anthropic</option>
-                                    <option value="google">Google</option>
-                                </select>
-                            </div>
-                            <input type="password" id="tv_sidecar_api_key" class="tv-text-input" style="margin-bottom: 6px;" placeholder="API key" autocomplete="off" />
-                            <input type="text" id="tv_sidecar_model" class="tv-text-input" style="margin-bottom: 6px;" placeholder="Model (e.g. gpt-4o-mini)" />
-                            <button id="tv_sidecar_test" class="menu_button" type="button" style="margin-bottom: 6px;">Test Connection</button>
-                            <div id="tv_sidecar_sampler_fields" style="display: none;">
-                                <div style="display: flex; gap: 8px; align-items: center;">
-                                    <div style="flex: 1;">
-                                        <label class="tv-label" for="tv_sidecar_temperature">Temperature: <span id="tv_sidecar_temp_val">0.3</span></label>
-                                        <input type="range" id="tv_sidecar_temperature" min="0" max="1" step="0.05" value="0.3" />
-                                    </div>
-                                    <div style="flex: 1;">
-                                        <label class="tv-label" for="tv_sidecar_max_tokens">Max Tokens</label>
-                                        <input type="number" id="tv_sidecar_max_tokens" class="tv-number-input" min="256" max="32768" step="256" value="1000" />
-                                    </div>
-                                </div>
-                                <!-- Auto-Retrieval (pre-gen) -->
-                                <div style="margin-top: 10px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 8px;">
-                                    <label class="tv-toggle">
-                                        <input id="tv_sidecar_auto_retrieval" type="checkbox" />
-                                        <span class="tv-toggle-slider"></span>
-                                        <span class="tv-toggle-label">Auto-Retrieve Before Generation</span>
-                                    </label>
-                                    <div class="tv-help-text" style="margin-top: 4px;">
-                                        Before each generation, the sidecar navigates the tree and injects relevant entries into context. Uses your mandatory prompt position/depth/role settings for injection placement.
-                                    </div>
-                                    <div id="tv_sidecar_retrieval_fields" style="display: none; margin-top: 8px;">
-                                        <div style="display: flex; gap: 8px; align-items: center;">
-                                            <div style="flex: 1;">
-                                                <label class="tv-label" for="tv_sidecar_context_messages">Chat Context (messages)</label>
-                                                <input type="number" id="tv_sidecar_context_messages" class="tv-number-input" min="1" max="50" step="1" value="10" />
-                                            </div>
-                                            <div style="flex: 1;">
-                                                <label class="tv-label" for="tv_sidecar_max_injection">Max Injection (tokens)</label>
-                                                <input type="number" id="tv_sidecar_max_injection" class="tv-number-input" min="500" max="16000" step="500" value="4000" />
-                                            </div>
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Auto-enable lorebooks whose names contain this text. Use <code>{{char}}</code> for the current character name.
+                                            <br>Example: <code>TV - {{char}}</code> would auto-enable "TV - Sable" when chatting with Sable.
                                         </div>
-                                        <div style="margin-top: 8px;">
-                                            <label class="tv-toggle">
-                                                <input id="tv_conditional_triggers" type="checkbox" />
-                                                <span class="tv-toggle-slider"></span>
-                                                <span class="tv-toggle-label">Narrative Conditionals</span>
+                                        <input type="text" id="tv_auto_detect_pattern" class="text_pole" placeholder="e.g. TV - {{char}}" />
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Multi-Lorebook Mode</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            How to present multiple active lorebooks to the AI during search.
+                                        </div>
+                                        <div class="tv-radio-group">
+                                            <label class="tv-radio">
+                                                <input type="radio" name="tv_multi_book_mode" value="unified" checked />
+                                                <span class="tv-radio-label">Unified Tree <span class="tv-badge-default">Default</span></span>
                                             </label>
-                                            <div class="tv-help-text" style="margin-top: 4px;">
-                                                Evaluate <code>[mood:X]</code>, <code>[location:X]</code>, <code>[weather:X]</code>, <code>[activity:X]</code>, <code>[relationship:X]</code>, <code>[emotion:X]</code>, and <code>[timeOfDay:X]</code> conditions on lorebook entries. Add these as keywords and the sidecar will evaluate scene state to decide if entries should activate.
-                                            </div>
+                                            <div class="tv-tool-desc">All lorebook trees merged into one view. AI sees all categories as siblings. Fewer tool calls, simpler navigation.</div>
+
+                                            <label class="tv-radio">
+                                                <input type="radio" name="tv_multi_book_mode" value="per-book" />
+                                                <span class="tv-radio-label">Per-Book Navigation</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Each lorebook shown as a separate document node. AI picks a lorebook first, then navigates its tree. Better for very different lorebooks.</div>
+                                        </div>
+                        
                                         </div>
                                     </div>
-                                </div>
-                                <!-- Post-Gen Writer -->
-                                <div style="margin-top: 10px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 8px;">
-                                    <label class="tv-toggle">
-                                        <input id="tv_sidecar_post_gen_writer" type="checkbox" />
-                                        <span class="tv-toggle-slider"></span>
-                                        <span class="tv-toggle-label">Auto-Write After Generation</span>
-                                    </label>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>LLM Build Detail Level</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            How much entry data to send when building/summarizing the tree with LLM. Applies to categorization, subdivision, and summary generation.
+                                        </div>
+                                        <select id="tv_llm_detail" class="tv-select">
+                                            <option value="full">Full (complete untruncated content + all metadata)</option>
+                                            <option value="lite" selected>Lite (content preview + keys + settings)</option>
+                                            <option value="names">Names only (minimal tokens)</option>
+                                        </select>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            <strong>Full</strong> sends complete untruncated entry content — best categorization but heavy on tokens. Use with large context models (80k+).<br/>
+                                            <strong>Lite</strong> sends a 150-char content preview + keys, groups, and settings. Good balance of quality and cost. <span class="tv-badge-default">Default</span><br/>
+                                            <strong>Names</strong> — cheapest, AI can only group by titles.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Tree Granularity</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Controls how aggressively the LLM breaks up your entries during tree building. Higher = more categories, more sub-categories, fewer entries per node. Lower = broader groupings with more entries per node.
+                                        </div>
+                                        <select id="tv_tree_granularity" class="tv-select">
+                                            <option value="0">Auto (scales with lorebook size)</option>
+                                            <option value="1">Minimal — keep entries grouped broadly (3-5 categories)</option>
+                                            <option value="2">Moderate — balanced splitting (5-8 categories)</option>
+                                            <option value="3">Detailed — break up into many specific groups (8-15 categories)</option>
+                                            <option value="4">Extensive — maximum splitting, tiny groups (12-20 categories)</option>
+                                        </select>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            <strong>Auto</strong> scales splitting based on how many entries you have. Override if you want the tree broken up more or less than the default. Requires a tree rebuild to take effect.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>LLM Chunk Size</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Maximum characters per LLM call when categorizing entries. Large lorebooks are split into chunks of this size. The last entry in a chunk is always included in full (overfill) so entries are never cut off mid-way. Lower values = more LLM calls but safer for smaller context models.
+                                        </div>
+                                        <div class="tv-number-row">
+                                            <input id="tv_chunk_tokens" type="number" class="tv-number-input" min="5000" max="500000" step="5000" value="30000" />
+                                            <span class="tv-number-label">characters (~7,500 tokens at default)</span>
+                                        </div>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            <strong>30,000</strong> chars is a safe default for most APIs (~8k tokens). Raise to <strong>100,000+</strong> for large-context models (128k+). If your lorebook fits in one chunk, no splitting occurs.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                <div class="tv-adv-section" id="tv_collapsed_depth_section" style="display:none;">
+                                    <div class="tv-adv-section-title">Collapsed Tree Depth</div>
+                                    <div class="tv-help-text" style="margin-bottom: 8px;">
+                                        How many levels of the tree to show in the tool description. The AI sees this many levels at once and navigates deeper with additional tool calls. Lower values = smaller tool description but more calls needed. Higher values = more visible at once but heavier on context.
+                                    </div>
+                                    <div class="tv-number-row">
+                                        <input id="tv_collapsed_depth" type="number" class="tv-number-input" min="1" max="4" step="1" value="2" />
+                                        <span class="tv-number-label">levels visible</span>
+                                    </div>
                                     <div class="tv-help-text" style="margin-top: 4px;">
-                                        After each response, the sidecar reviews the conversation and automatically creates or updates lorebook entries for significant events, character changes, and new facts.
-                                    </div>
-                                    <div id="tv_sidecar_writer_fields" style="display: none; margin-top: 8px;">
-                                        <div style="display: flex; gap: 8px; align-items: center;">
-                                            <div style="flex: 1;">
-                                                <label class="tv-label" for="tv_sidecar_writer_context">Chat Context (messages)</label>
-                                                <input type="number" id="tv_sidecar_writer_context" class="tv-number-input" min="1" max="50" step="1" value="15" />
-                                            </div>
-                                            <div style="flex: 1;">
-                                                <label class="tv-label" for="tv_sidecar_writer_max_ops">Max Operations Per Turn</label>
-                                                <input type="number" id="tv_sidecar_writer_max_ops" class="tv-number-input" min="1" max="10" step="1" value="5" />
-                                            </div>
-                                        </div>
+                                        <strong>1</strong> — Top-level only. Minimal context, always needs navigate calls.<br/>
+                                        <strong>2</strong> — Two levels. Good balance for most lorebooks. <span class="tv-badge-default">Default</span><br/>
+                                        <strong>3-4</strong> — Deep view. Better for small-medium lorebooks where you want single-call retrieval.
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <div class="tv-adv-subsection" style="margin-top: 12px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 8px;">
-                                <div class="tv-adv-section-title">Embedding Sidecar</div>
-                                <div class="tv-help-text" style="margin-bottom: 6px;">
-                                    Optional separate endpoint for embeddings (vector dedup / similarity). API key may be empty for local servers.
+                        <div class="tv-adv-group inline-drawer">
+                            <div class="tv-adv-group-title inline-drawer-toggle inline-drawer-header">
+                                <span>Retrieval</span>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                            </div>
+                            <div class="inline-drawer-content">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Search Mode</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            How the AI navigates your lorebook tree during generation.
+                                        </div>
+                                        <div class="tv-radio-group">
+                                            <label class="tv-radio">
+                                                <input type="radio" name="tv_search_mode" value="traversal" checked />
+                                                <span class="tv-radio-label">Traversal <span class="tv-badge-default">Default</span></span>
+                                            </label>
+                                            <div class="tv-tool-desc">Step-by-step navigation. AI sees one level at a time, picks a branch, drills deeper. Uses multiple tool calls. Better for very large trees (100+ nodes) where showing everything at once would overwhelm context.</div>
+
+                                            <label class="tv-radio">
+                                                <input type="radio" name="tv_search_mode" value="collapsed" />
+                                                <span class="tv-radio-label">Collapsed Tree <span class="tv-badge-recommended">Recommended</span></span>
+                                            </label>
+                                            <div class="tv-tool-desc">Full tree shown at once. AI sees all categories and summaries in a single view and picks directly. Uses fewer tool calls, better retrieval accuracy. Based on RAPTOR research showing collapsed-tree consistently outperforms top-down traversal.</div>
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Selective Retrieval</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <label class="tv-toggle-row">
+                                            <input id="tv_selective_retrieval" type="checkbox" />
+                                            <span>Show entry names first, let AI pick specific entries</span>
+                                        </label>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            <strong>Off (default):</strong> When the AI reaches a leaf node, all entries are injected into context automatically. Simpler, fewer tool calls.<br/>
+                                            <strong>On:</strong> When the AI reaches a leaf node, it sees a manifest of entry titles/keys instead of full content. It must then request specific entries by name. More precise retrieval — useful for large leaf nodes where only some entries are relevant — but costs an extra tool call per retrieval.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Prompt Injection</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Controls where and how TunnelVision injects its prompts into the conversation. Position and depth determine where the prompt lands in the message list the AI sees.
+                                        </div>
+
+                                        <!-- Total Injection Budget -->
+                                        <div style="margin-bottom: 12px;">
+                                            <label class="tv-label" for="tv_total_injection_budget">Total Injection Budget (characters)</label>
+                                            <div class="tv-number-row">
+                                                <input id="tv_total_injection_budget" type="number" class="tv-number-input" min="0" max="100000" step="500" value="0" />
+                                                <span class="tv-number-label">chars (0 = unlimited)</span>
+                                            </div>
+                                            <div class="tv-help-text" style="margin-top: 4px;">
+                                                Caps the combined size of the mandatory-tools, world state, smart context, and notebook prompts. When the combined text would exceed this, prompts are trimmed in priority order (mandatory &gt; world state &gt; smart context &gt; notebook). 0 disables the cap.
+                                            </div>
+                                        </div>
+
+                                        <!-- Mandatory Tool Calls -->
+                                        <div class="tv-prompt-inject-block" style="margin-bottom: 12px;">
+                                            <label class="tv-checkbox-row" style="margin-bottom: 6px;">
+                                                <input id="tv_mandatory_tools" type="checkbox" />
+                                                <span><strong>Mandatory Tool Calls</strong></span>
+                                            </label>
+                                            <div class="tv-help-text" style="margin-bottom: 6px;">
+                                                Injects an instruction telling the AI it MUST use TunnelVision tools every generation.
+                                            </div>
+                                            <div id="tv_mandatory_prompt_options" style="display:none;">
+                                                <div class="tv-prompt-inject-controls" style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                                                    <select id="tv_mandatory_position" class="tv-select" style="width: auto;">
+                                                        <option value="in_chat">In Chat</option>
+                                                        <option value="in_prompt">In System Prompt</option>
+                                                    </select>
+                                                    <div class="tv-number-row" id="tv_mandatory_depth_row" style="margin: 0;">
+                                                        <label class="tv-number-label" for="tv_mandatory_depth" style="margin: 0;">Depth:</label>
+                                                        <input id="tv_mandatory_depth" type="number" class="tv-number-input" min="0" max="50" step="1" value="1" style="width: 50px;" />
+                                                    </div>
+                                                    <select id="tv_mandatory_role" class="tv-select" style="width: auto;">
+                                                        <option value="system">System</option>
+                                                        <option value="user">User</option>
+                                                        <option value="assistant">Assistant</option>
+                                                    </select>
+                                                </div>
+                                                <textarea id="tv_mandatory_prompt_text" class="tv-textarea" rows="3" style="font-size: 0.85em;"></textarea>
+                                                <div style="text-align: right; margin-top: 4px;">
+                                                    <button id="tv_mandatory_prompt_reset" class="tv-btn tv-btn-sm" title="Reset to default text">Reset</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Notebook Injection -->
+                                        <div class="tv-prompt-inject-block">
+                                            <div style="margin-bottom: 6px;"><strong>Notebook Injection</strong></div>
+                                            <div class="tv-help-text" style="margin-bottom: 6px;">
+                                                Where the AI's private notebook notes are injected into context each turn.
+                                            </div>
+                                            <div class="tv-prompt-inject-controls" style="display: flex; gap: 8px; align-items: center;">
+                                                <select id="tv_notebook_position" class="tv-select" style="width: auto;">
+                                                    <option value="in_chat">In Chat</option>
+                                                    <option value="in_prompt">In System Prompt</option>
+                                                </select>
+                                                <div class="tv-number-row" id="tv_notebook_depth_row" style="margin: 0;">
+                                                    <label class="tv-number-label" for="tv_notebook_depth" style="margin: 0;">Depth:</label>
+                                                    <input id="tv_notebook_depth" type="number" class="tv-number-input" min="0" max="50" step="1" value="1" style="width: 50px;" />
+                                                </div>
+                                                <select id="tv_notebook_role" class="tv-select" style="width: auto;">
+                                                    <option value="system">System</option>
+                                                    <option value="user">User</option>
+                                                    <option value="assistant">Assistant</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div class="tv-help-text" style="margin-top: 8px;">
+                                            <strong>In Chat</strong> injects at a specific depth in the message list (0 = bottom, 1 = before last message). Better for model attention on long chats.<br/>
+                                            <strong>In System Prompt</strong> places it in the story string area (depth is ignored). More stable but can get buried in long contexts.<br/>
+                                            <strong>Role</strong> controls which role the injected message appears as.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Constant Entry Passthrough</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Lorebook entries marked as "Constant" (always active) are normally suppressed along with all other TV-managed entries. Enable this to let constant entries pass through ST's normal injection pipeline, so they're always included in context regardless of tree search.
+                                        </div>
+                                        <label class="tv-toggle">
+                                            <input id="tv_passthrough_constant" type="checkbox" checked />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Let constant entries bypass TunnelVision gating</span>
+                                        </label>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            Useful for chat summaries, system rules, or other entries that should <em>always</em> be in context. These entries will still appear in the tree but won't depend on tool calls for injection.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Keyword Trigger Passthrough</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            By default, TunnelVision suppresses normal keyword triggering for managed lorebooks — entries are only injected when the AI searches for them. Enable this to let keyword triggers work alongside tree-based retrieval. Entries that fired via keywords will be marked "already in context" so the AI skips them during search.
+                                        </div>
+                                        <label class="tv-toggle">
+                                            <input id="tv_allow_keyword_triggers" type="checkbox" />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Allow traditional keyword triggers for TV-managed lorebooks</span>
+                                        </label>
+                        
+                                        </div>
+                                    </div>
+                            </div>
+                        </div>
+
+                        <div class="tv-adv-group inline-drawer">
+                            <div class="tv-adv-group-title inline-drawer-toggle inline-drawer-header">
+                                <span>Tools</span>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                            </div>
+                            <div class="inline-drawer-content">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Enable/Disable Built-in Tools</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Control which tools the AI can use. Disabling a tool unregisters it completely — the AI won't see it at all.
+                                        </div>
+
+                                        <div class="tv-tool-toggles">
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Search">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Search" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Search</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Navigate the lorebook tree to retrieve relevant entries for the current scene.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Remember">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Remember" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Remember</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Create new lorebook entries when important facts, character details, or world info emerge.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Summarize">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Summarize" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Summarize</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Create scene/event summaries for long-term memory. Captures what <em>happened</em> (narrative beats, turning points), separate from what <em>exists</em> (Remember). The AI decides when a scene is worth summarizing.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Update">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Update" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Update</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Edit existing entries when information changes or becomes outdated.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Forget">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Forget" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Forget</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Disable or delete entries that are no longer relevant or accurate.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Reorganize">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Reorganize" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Reorganize</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Move entries between categories or create new ones as the lorebook grows.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_MergeSplit">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_MergeSplit" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Merge/Split</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Combine two related entries into one, or split a large entry into focused pieces.</div>
+
+                                            <label class="tv-toggle tv-tool-toggle" data-tool="TunnelVision_Notebook">
+                                                <input type="checkbox" class="tv_tool_enabled" data-tool="TunnelVision_Notebook" checked />
+                                                <span class="tv-toggle-slider"></span>
+                                                <span class="tv-toggle-label">Notebook</span>
+                                            </label>
+                                            <div class="tv-tool-desc">Private AI scratchpad. The AI writes notes to itself (plans, follow-ups, narrative threads) that persist per-chat and are injected into context every turn. Invisible in chat output.</div>
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Tool Call Confirmation</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Require your approval before the AI can execute these tools. When enabled, a popup will show what the AI wants to do and wait for you to approve or deny.
+                                        </div>
+                                        <div class="tv-tool-confirm-toggles">
+                                            <label class="tv-checkbox-row">
+                                                <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Remember" />
+                                                <span>Remember — creating new entries</span>
+                                            </label>
+                                            <label class="tv-checkbox-row">
+                                                <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Update" />
+                                                <span>Update — modifying existing entries</span>
+                                            </label>
+                                            <label class="tv-checkbox-row">
+                                                <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Forget" />
+                                                <span>Forget — disabling/deleting entries</span>
+                                            </label>
+                                            <label class="tv-checkbox-row">
+                                                <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Summarize" />
+                                                <span>Summarize — creating scene summaries</span>
+                                            </label>
+                                            <label class="tv-checkbox-row">
+                                                <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_Reorganize" />
+                                                <span>Reorganize — moving entries between categories</span>
+                                            </label>
+                                            <label class="tv-checkbox-row">
+                                                <input type="checkbox" class="tv_tool_confirm" data-tool="TunnelVision_MergeSplit" />
+                                                <span>Merge/Split — combining or splitting entries</span>
+                                            </label>
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Tool Prompt Overrides</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Customize the instructions the AI sees for each tool. This controls <em>when</em> and <em>how</em> the AI decides to use each tool. Only the description text is editable — the tool's parameters and behavior cannot be changed. Leave empty to use the default prompt.
+                                        </div>
+                                        <div id="tv_tool_prompt_overrides" class="tv-tool-prompt-overrides">
+                                            <!-- Rendered by JS -->
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Tool Call Recursion Limit</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Maximum number of consecutive tool calls the AI can make per generation. SillyTavern's default is 5. Raising this allows deeper tree traversal and more tool actions per turn, but costs more API tokens. Most relevant in Traversal mode.
+                                        </div>
+                                        <div class="tv-number-row">
+                                            <input id="tv_recurse_limit" type="number" class="tv-number-input" min="1" max="50" step="1" value="5" />
+                                            <span class="tv-number-label">calls per generation</span>
+                                        </div>
+                                        <div class="tv-help-text tv-warn-text" id="tv_recurse_warn" style="display:none;">
+                                            <i class="fa-solid fa-triangle-exclamation"></i> Values above 10 may significantly increase API costs. Each recursion sends the full context + tool results back to the API.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Hide Tool-Call Messages</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            When enabled, TunnelVision tool-call messages are visually hidden in the chat. The AI still uses them normally, but the messages won't appear in the conversation. Useful for a cleaner chat experience.
+                                        </div>
+                                        <label class="tv-checkbox-row">
+                                            <input id="tv_stealth_mode" type="checkbox" />
+                                            <span>Hide tool-call messages in chat</span>
+                                        </label>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Ephemeral Tool Results</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Strip retrieved lorebook content from older tool-call messages before each generation. This prevents past search results from accumulating in context and bloating your chat history.
+                                        </div>
+                                        <label class="tv-checkbox-row">
+                                            <input id="tv_ephemeral_results" type="checkbox" />
+                                            <span>Clear old TunnelVision results from context</span>
+                                        </label>
+                                        <div class="tv-help-text" style="margin-top: 4px; color: #e8a03c;">
+                                            <strong>Warning:</strong> This permanently modifies chat message data. Old tool results will be replaced with a short stub and cannot be recovered. The AI will re-search for lore each turn instead of seeing past retrievals. This saves context tokens but costs more tool calls.
+                                        </div>
+                                        <div id="tv_ephemeral_filter_options" style="display: none; margin-top: 8px; padding-left: 4px;">
+                                            <div class="tv-help-text" style="margin-bottom: 6px;">Choose which tool results get stripped. Notebook is always protected.</div>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Search" /><span>Search</span></label>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Remember" /><span>Remember</span></label>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Update" /><span>Update</span></label>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Forget" /><span>Forget</span></label>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Reorganize" /><span>Reorganize</span></label>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_Summarize" /><span>Summarize</span></label>
+                                            <label class="tv-checkbox-row"><input type="checkbox" class="tv_ephemeral_tool" value="TunnelVision_MergeSplit" /><span>Merge/Split</span></label>
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                <div class="tv-adv-section">
+                                    <div class="tv-setting-row">
+                                        <label class="tv-toggle">
+                                            <input id="tv_compact_tool_prompts" type="checkbox" />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Compact Tool Prompts</span>
+                                        </label>
+                                        <div class="tv-help-text">Reduces token usage by sending short tool descriptions with a central guide. The model can request full details on demand. Saves ~2000 tokens per generation.</div>
+                                    </div>
                                 </div>
-                                <label class="tv-toggle" style="margin-bottom: 6px;">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Slash Commands</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Use <code>/tv-search</code>, <code>/tv-remember</code>, <code>/tv-summarize</code>,
+                                            <code>/tv-forget</code>, <code>/tv-merge</code>, <code>/tv-split</code>, <code>/tv-ingest</code>
+                                            in the chat box to force tool actions.
+                                        </div>
+                                        <div class="tv-number-row">
+                                            <label class="tv-number-label" for="tv_command_context">Context messages:</label>
+                                            <input id="tv_command_context" type="number" class="tv-number-input" min="5" max="500" step="5" value="50" />
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                            </div>
+                        </div>
+
+                        <div class="tv-adv-group inline-drawer">
+                            <div class="tv-adv-group-title inline-drawer-toggle inline-drawer-header">
+                                <span>Memory & Summarisation</span>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                            </div>
+                            <div class="inline-drawer-content">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Auto-Summary</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Automatically inject a summarize instruction every N messages. The AI will create a summary of recent events as part of its next response.
+                                        </div>
+                                        <label class="tv-toggle">
+                                            <input id="tv_auto_summary_enabled" type="checkbox" />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Enable auto-summary</span>
+                                        </label>
+                                        <div id="tv_auto_summary_options" style="display: none; margin-top: 8px;">
+                                            <div class="tv-number-row">
+                                                <label class="tv-number-label" for="tv_auto_summary_interval">Interval:</label>
+                                                <input id="tv_auto_summary_interval" type="number" class="tv-number-input" min="5" max="200" step="5" value="20" />
+                                                <span class="tv-number-label">messages</span>
+                                            </div>
+                                            <div id="tv_auto_summary_counter" class="tv-help-text" style="margin-top: 4px;">
+                                                Messages since last summary: <strong id="tv_auto_summary_count">0</strong>
+                                            </div>
+                                        </div>
+                                        <label class="tv-toggle" style="margin-top: 8px;">
+                                            <input id="tv_auto_hide_summarized" type="checkbox" />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Auto-hide summarized messages</span>
+                                        </label>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            When enabled, messages covered by a summary are hidden from chat to save tokens. Hidden messages can be restored with /unhide.
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Duplicate Detection</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            When enabled, the Remember tool checks for semantically similar existing entries before saving. If a near-duplicate is found, the AI is warned (but not blocked) — it can choose to update the existing entry instead.
+                                        </div>
+                                        <label class="tv-toggle">
+                                            <input id="tv_vector_dedup" type="checkbox" />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Enable duplicate detection</span>
+                                        </label>
+                                        <div id="tv_dedup_status" class="tv-dedup-status" style="display:none; margin-top: 6px;">
+                                            <i class="fa-solid fa-circle-info"></i>
+                                            <span id="tv_dedup_method_text">Checking...</span>
+                                        </div>
+                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                            Uses trigram similarity — fast character n-gram matching that catches near-duplicates and morphological variants. No external dependencies needed.
+                                        </div>
+                                        <div id="tv_dedup_threshold_row" class="tv-number-row" style="margin-top: 8px; display: none;">
+                                            <label class="tv-number-label" for="tv_dedup_threshold">Similarity threshold:</label>
+                                            <input id="tv_dedup_threshold" type="number" class="tv-number-input" min="0.5" max="0.99" step="0.01" value="0.85" />
+                                            <span class="tv-help-text" style="margin: 0;">(0.85 = high similarity)</span>
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                            </div>
+                        </div>
+
+                        <div class="tv-adv-group inline-drawer">
+                            <div class="tv-adv-group-title inline-drawer-toggle inline-drawer-header">
+                                <span>Sidecars <small class="tv-adv-group-sub">Specify LLMs for TunnelVision and/or embeddings</small></span>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                            </div>
+                            <div class="inline-drawer-content">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Sidecar LLM</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Direct API for TV's own LLM operations (tree building, summaries, ingest, retrieval). TV calls the endpoint you set below using its own key — no <code>allowKeysExposure</code> needed. Leave disabled to use ST's current API via generateRaw.
+                                        </div>
+                                        <label class="tv-toggle" style="margin-bottom: 6px;">
+                                            <input id="tv_sidecar_enabled" type="checkbox" />
+                                            <span class="tv-toggle-slider"></span>
+                                            <span class="tv-toggle-label">Enable Sidecar LLM</span>
+                                        </label>
+                                        <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                                            <input type="text" id="tv_sidecar_endpoint" class="tv-text-input" style="flex: 2;" placeholder="Endpoint (e.g. https://api.openai.com/v1)" />
+                                            <select id="tv_sidecar_format" class="tv-select" style="flex: 1;">
+                                                <option value="openai">OpenAI-compatible</option>
+                                                <option value="anthropic">Anthropic</option>
+                                                <option value="google">Google</option>
+                                            </select>
+                                        </div>
+                                        <input type="password" id="tv_sidecar_api_key" class="tv-text-input" style="margin-bottom: 6px;" placeholder="API key" autocomplete="off" />
+                                        <input type="text" id="tv_sidecar_model" class="tv-text-input" style="margin-bottom: 6px;" placeholder="Model (e.g. gpt-4o-mini)" />
+                                        <button id="tv_sidecar_test" class="menu_button" type="button" style="margin-bottom: 6px;">Test Connection</button>
+                                        <div id="tv_sidecar_sampler_fields" style="display: none;">
+                                            <div style="display: flex; gap: 8px; align-items: center;">
+                                                <div style="flex: 1;">
+                                                    <label class="tv-label" for="tv_sidecar_temperature">Temperature: <span id="tv_sidecar_temp_val">0.3</span></label>
+                                                    <input type="range" id="tv_sidecar_temperature" min="0" max="1" step="0.05" value="0.3" />
+                                                </div>
+                                                <div style="flex: 1;">
+                                                    <label class="tv-label" for="tv_sidecar_max_tokens">Max Tokens</label>
+                                                    <input type="number" id="tv_sidecar_max_tokens" class="tv-number-input" min="256" max="32768" step="256" value="1000" />
+                                                </div>
+                                            </div>
+                                            <!-- Auto-Retrieval (pre-gen) -->
+                                            <div style="margin-top: 10px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 8px;">
+                                                <label class="tv-toggle">
+                                                    <input id="tv_sidecar_auto_retrieval" type="checkbox" />
+                                                    <span class="tv-toggle-slider"></span>
+                                                    <span class="tv-toggle-label">Auto-Retrieve Before Generation</span>
+                                                </label>
+                                                <div class="tv-help-text" style="margin-top: 4px;">
+                                                    Before each generation, the sidecar navigates the tree and injects relevant entries into context. Uses your mandatory prompt position/depth/role settings for injection placement.
+                                                </div>
+                                                <div id="tv_sidecar_retrieval_fields" style="display: none; margin-top: 8px;">
+                                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                                        <div style="flex: 1;">
+                                                            <label class="tv-label" for="tv_sidecar_context_messages">Chat Context (messages)</label>
+                                                            <input type="number" id="tv_sidecar_context_messages" class="tv-number-input" min="1" max="50" step="1" value="10" />
+                                                        </div>
+                                                        <div style="flex: 1;">
+                                                            <label class="tv-label" for="tv_sidecar_max_injection">Max Injection (tokens)</label>
+                                                            <input type="number" id="tv_sidecar_max_injection" class="tv-number-input" min="500" max="16000" step="500" value="4000" />
+                                                        </div>
+                                                    </div>
+                                                    <div style="margin-top: 8px;">
+                                                        <label class="tv-toggle">
+                                                            <input id="tv_conditional_triggers" type="checkbox" />
+                                                            <span class="tv-toggle-slider"></span>
+                                                            <span class="tv-toggle-label">Narrative Conditionals</span>
+                                                        </label>
+                                                        <div class="tv-help-text" style="margin-top: 4px;">
+                                                            Evaluate <code>[mood:X]</code>, <code>[location:X]</code>, <code>[weather:X]</code>, <code>[activity:X]</code>, <code>[relationship:X]</code>, <code>[emotion:X]</code>, and <code>[timeOfDay:X]</code> conditions on lorebook entries. Add these as keywords and the sidecar will evaluate scene state to decide if entries should activate.
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <!-- Post-Gen Writer -->
+                                            <div style="margin-top: 10px; border-top: 1px solid var(--SmartThemeBorderColor); padding-top: 8px;">
+                                                <label class="tv-toggle">
+                                                    <input id="tv_sidecar_post_gen_writer" type="checkbox" />
+                                                    <span class="tv-toggle-slider"></span>
+                                                    <span class="tv-toggle-label">Auto-Write After Generation</span>
+                                                </label>
+                                                <div class="tv-help-text" style="margin-top: 4px;">
+                                                    After each response, the sidecar reviews the conversation and automatically creates or updates lorebook entries for significant events, character changes, and new facts.
+                                                </div>
+                                                <div id="tv_sidecar_writer_fields" style="display: none; margin-top: 8px;">
+                                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                                        <div style="flex: 1;">
+                                                            <label class="tv-label" for="tv_sidecar_writer_context">Chat Context (messages)</label>
+                                                            <input type="number" id="tv_sidecar_writer_context" class="tv-number-input" min="1" max="50" step="1" value="15" />
+                                                        </div>
+                                                        <div style="flex: 1;">
+                                                            <label class="tv-label" for="tv_sidecar_writer_max_ops">Max Operations Per Turn</label>
+                                                            <input type="number" id="tv_sidecar_writer_max_ops" class="tv-number-input" min="1" max="10" step="1" value="5" />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Background LLM Instructions</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Extra system instructions for TunnelVision's background LLM calls: tree building, chat ingest, sidecar retrieval, and post-generation writing. This does not change tool descriptions in the main chat request.
+                                        </div>
+                                        <textarea id="tv_background_prompt_addendum" class="tv-textarea" rows="4" placeholder="Optional provider/model instructions for background TunnelVision calls."></textarea>
+                        
+                                        </div>
+                                    </div>
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Background LLM Call Timeout</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            How long to wait for a single background LLM call (tree building, world state, smart context, memory lifecycle, post-turn processing) before retrying. Does not affect the main chat generation.
+                                        </div>
+                                        <div class="tv-number-row">
+                                            <input id="tv_llm_call_timeout" type="number" class="tv-number-input" min="10" max="600" step="5" value="120" />
+                                            <span class="tv-number-label">seconds</span>
+                                        </div>
+                        
+                                        </div>
+                                    </div>
+                                                        <div class="tv-adv-section inline-drawer">
+                                    <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                        <span>Embedding Sidecar</span>
+                                        <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                    </div>
+                                    <div class="inline-drawer-content" style="display:block;">
+
+                                    <div class="tv-help-text" style="margin-bottom: 6px;">
+                                    Optional separate endpoint for embeddings (vector dedup / similarity). API key may be empty for local servers.
+                                    </div>
+                                    <label class="tv-toggle" style="margin-bottom: 6px;">
                                     <input id="tv_embedding_enabled" type="checkbox" />
                                     <span class="tv-toggle-slider"></span>
                                     <span class="tv-toggle-label">Enable Embedding Sidecar</span>
-                                </label>
-                                <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                                    </label>
+                                    <div style="display: flex; gap: 8px; margin-bottom: 6px;">
                                     <input type="text" id="tv_embedding_endpoint" class="tv-text-input" style="flex: 2;" placeholder="Endpoint (e.g. https://api.openai.com/v1)" />
                                     <select id="tv_embedding_format" class="tv-select" style="flex: 1;">
-                                        <option value="openai">OpenAI-compatible</option>
-                                        <option value="google">Google</option>
-                                        <option value="gemini">Gemini</option>
+                                    <option value="openai">OpenAI-compatible</option>
+                                    <option value="google">Google</option>
+                                    <option value="gemini">Gemini</option>
                                     </select>
+                                    </div>
+                                    <input type="password" id="tv_embedding_api_key" class="tv-text-input" style="margin-bottom: 6px;" placeholder="API key (optional)" autocomplete="off" />
+                                    <input type="text" id="tv_embedding_model" class="tv-text-input" style="margin-bottom: 6px;" placeholder="Model (e.g. text-embedding-3-small)" />
+                                    <button id="tv_embedding_test" class="menu_button" type="button">Test Connection</button>
+                        
+                                    </div>
                                 </div>
-                                <input type="password" id="tv_embedding_api_key" class="tv-text-input" style="margin-bottom: 6px;" placeholder="API key (optional)" autocomplete="off" />
-                                <input type="text" id="tv_embedding_model" class="tv-text-input" style="margin-bottom: 6px;" placeholder="Model (e.g. text-embedding-3-small)" />
-                                <button id="tv_embedding_test" class="menu_button" type="button">Test Connection</button>
                             </div>
                         </div>
+
+                        <div class="tv-adv-group inline-drawer">
+                            <div class="tv-adv-group-title inline-drawer-toggle inline-drawer-header">
+                                <span>Language</span>
+                                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                            </div>
+                            <div class="inline-drawer-content">
+                                                            <div class="tv-adv-section inline-drawer">
+                                        <div class="tv-adv-section-title inline-drawer-toggle inline-drawer-header">
+                                            <span>Output Language</span>
+                                            <div class="inline-drawer-icon fa-solid fa-circle-chevron-up up"></div>
+                                        </div>
+                                        <div class="inline-drawer-content" style="display:block;">
+
+                                        <div class="tv-help-text" style="margin-bottom: 8px;">
+                                            Force all TV-generated content (entries, summaries, tracker updates) to be written in this language. Leave empty to auto-match the conversation language.
+                                        </div>
+                                        <input type="text" id="tv_target_language" class="text_pole" placeholder="Auto (match conversation)" list="tv-lang-presets" />
+                                        <datalist id="tv-lang-presets">
+                                            <option value="English"></option>
+                                            <option value="Japanese"></option>
+                                            <option value="Korean"></option>
+                                            <option value="Chinese"></option>
+                                            <option value="Spanish"></option>
+                                            <option value="Portuguese"></option>
+                                            <option value="French"></option>
+                                            <option value="German"></option>
+                                            <option value="Russian"></option>
+                                            <option value="Italian"></option>
+                                            <option value="Thai"></option>
+                                            <option value="Vietnamese"></option>
+                                            <option value="Indonesian"></option>
+                                            <option value="Arabic"></option>
+                                            <option value="Turkish"></option>
+                                            <option value="Polish"></option>
+                                            <option value="Ukrainian"></option>
+                                        </datalist>
+                        
+                                        </div>
+                                    </div>
+                            </div>
+                        </div>
+
+
+                        <!-- ═══ Output Language ═══ -->
+
+
+
+
+                        <!-- ═══ LLM Call Timeout ═══ -->
+
+
+                        <!-- ═══ Search Mode ═══ -->
+
+
+
+
+
+
+                        <!-- ═══ Tool Call Recursion Limit ═══ -->
+
+
+                        <!-- ═══ Prompt Injection ═══ -->
+
+
+                        <!-- ═══ Hide Tool-Call Messages ═══ -->
+
+
+
+
+                        <!-- ═══ LLM Build Detail ═══ -->
+
+
+                        <!-- ═══ Tree Granularity ═══ -->
+
+
+                        <!-- ═══ LLM Chunk Size ═══ -->
+
+
+                        <!-- ═══ Vector Dedup ═══ -->
+
+
+                        <!-- ═══ Compact Tool Prompts ═══ -->
+
+
+                        <!-- ═══ Tool Toggles ═══ -->
+
+
+                        <!-- ═══ Tool Confirmation ═══ -->
+
+
+                        <!-- ═══ Tool Prompt Overrides ═══ -->
+
+
+                        <!-- ═══ Slash Commands ═══ -->
+
+
+                        <!-- ═══ Auto-Summary ═══ -->
+
+
+                        <!-- ═══ Constant Entry Passthrough ═══ -->
+
+
+                        <!-- ═══ Keyword Trigger Passthrough ═══ -->
+
+
+                        <!-- ═══ Multi-Lorebook Mode ═══ -->
+
+
+                        <!-- ═══ Sidecar LLM ═══ -->
+
+
+
                     </div>
                 </div>
 
@@ -1143,4 +1359,5 @@
     <!-- Hidden file input for import -->
     <input type="file" id="tv_import_file" accept=".json" style="display:none;" />
     <input type="file" id="tv_bulk_import_file" accept=".json" style="display:none;" />
+</div>
 </div>
