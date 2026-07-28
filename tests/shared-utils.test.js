@@ -502,7 +502,7 @@ import {
 
 describe('secret tag', () => {
     it('matches a tagged entry regardless of case and suffix', () => {
-        expect(SECRET_TAG_RE.test('[SECRET — Elena is unaware] She is the heir.')).toBe(true);
+        expect(SECRET_TAG_RE.test('[SECRET — Marcus is unaware] Elena is the heir.')).toBe(true);
         expect(SECRET_TAG_RE.test('[secret] hidden')).toBe(true);
         expect(SECRET_TAG_RE.test('[SECRET: king] plot')).toBe(true);
     });
@@ -517,5 +517,14 @@ describe('secret tag', () => {
         expect(SECRET_AUTHORING_INSTRUCTION).toContain('[SECRET');
         expect(SECRET_GUARD_LINE).toContain('does not hide content');
         expect(SECRET_AUTHORING_INSTRUCTION).toContain('not privacy or access control');
+    });
+
+    it('authoring instruction defines <who> as the character who does not know it', () => {
+        // Regression: the model filled <who> with the entry's subject, producing
+        // "[SECRET — B is unaware]" for a fact only A is ignorant of, and tagging
+        // facts a character already knows.
+        expect(SECRET_AUTHORING_INSTRUCTION).toContain('does NOT know');
+        expect(SECRET_AUTHORING_INSTRUCTION).toContain('not the character the entry is about');
+        expect(SECRET_AUTHORING_INSTRUCTION).toContain('[SECRET — Marcus is unaware]');
     });
 });

@@ -290,12 +290,18 @@ export const SECRET_TAG_RE = /\[SECRET\b/i;
 export const SECRET_GUARD_LINE =
     '[Roleplay guidance: some retrieved entries use [SECRET …] for information a character does not yet know. ' +
     'This tag does not hide content from the model or provide privacy/access control. ' +
-    'Treat them as narrator-only dramatic irony — do not let that character reveal, act on, or acknowledge the ' +
-    "information until the story establishes they've learned it.]";
+    'Treat them as narrator-only dramatic irony — do not let the character named in the tag reveal, act on, or ' +
+    "acknowledge the information until the story establishes they've learned it. Characters not named in the tag " +
+    'are unaffected and may know it.]';
 
 /** Appended to write-tool content descriptions so the model applies/removes the tag. */
 export const SECRET_AUTHORING_INSTRUCTION =
     ' For roleplay guidance only (not privacy or access control), if information is unknown to a character ' +
     '(secrets, dramatic irony, things not yet learned), ' +
-    'prefix the content with [SECRET — <who> is unaware]. When the story establishes the character has learned it, ' +
-    'update the entry to remove the tag.';
+    'prefix the content with [SECRET — <who> is unaware]. <who> is the character who does NOT know the ' +
+    'information — not the character the entry is about, unless they are the same person. ' +
+    "Example: Elena is secretly the heir and Marcus has not learned this, so the entry about Elena's " +
+    'heritage reads [SECRET — Marcus is unaware] Elena is the lost heir. ' +
+    'Tag only when the chat shows that character does not know it; never tag information a character already ' +
+    'has, and if in doubt omit the tag. ' +
+    'When the story establishes the character has learned it, update the entry to remove the tag.';
