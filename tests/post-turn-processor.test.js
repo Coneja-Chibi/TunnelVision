@@ -261,7 +261,9 @@ describe('updateTrackers', () => {
         ]);
         expect(updateEntry).toHaveBeenCalledWith('test-book', 7, {
             content: '## Current Status\nMood: alert',
-            _source: 'post-turn',
+            // Must be _backgroundSource: updateEntry reads that key to run the
+            // static-entry guard. Any other spelling silently disables it.
+            _backgroundSource: 'post-turn',
         });
         expect(getContext().chatMetadata.tunnelvision_tracker_hashes['test-book:7'].hash)
             .toBe(contentHash('## Current Status\nMood: alert'));
@@ -297,7 +299,7 @@ describe('updateTrackers', () => {
         expect(result.updated).toBe(1);
         expect(updateEntry).toHaveBeenCalledWith('test-book', 9, {
             content: '## Current Status\nLocation: safehouse',
-            _source: 'post-turn',
+            _backgroundSource: 'post-turn',
         });
     });
 });

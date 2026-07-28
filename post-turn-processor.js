@@ -1083,7 +1083,7 @@ export async function updateTrackers(trackers, recentExcerpt, chatId) {
         const previousContent = tracker.content;
         await updateEntry(tracker.book, Number(update.uid), {
           content: newContent,
-          _source: "post-turn",
+          _backgroundSource: "post-turn",
         });
 
         setTrackerHash(tracker.book, tracker.uid, contentHash(newContent));
