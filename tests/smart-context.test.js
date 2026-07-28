@@ -783,7 +783,7 @@ describe('secret guard', () => {
                     uid: 10,
                     comment: 'Elena heritage',
                     key: ['elena'],
-                    content: '[SECRET — Elena is unaware] Elena is the lost heir.',
+                    content: '[SECRET — Marcus is unaware] Elena is the lost heir.',
                 }),
             },
         });

@@ -639,7 +639,7 @@ function buildGuideDescription(allDefs, disabled) {
 - Use Forget only when information is definitively wrong or irrelevant
 - Use Summarize for significant scenes and narrative beats
 - Keep entries broad — combine related facts rather than creating many small entries
-- Use [SECRET — <who> is unaware] only as roleplay guidance for content a character must not know; it does not hide content from the model. Remove the tag via Update once the story establishes they've learned it`;
+- Use [SECRET — <who> is unaware] only as roleplay guidance for content a character must not know; <who> is the character who does NOT know it, not the entry's subject. It does not hide content from the model. Remove the tag via Update once the story establishes they've learned it`;
 
     // Add dynamic content (tree overview, tracker list) to the guide
     const treeOverview = getTreeOverview();
