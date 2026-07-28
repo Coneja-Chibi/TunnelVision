@@ -26,7 +26,7 @@ import {
     hideSummarizedMessages,
     getWatermark,
 } from './tools/summarize.js';
-import { applyCollapse } from './summary-collapse.js';
+import { postSummaryMarker } from './summary-collapse.js';
 
 /** Hard ceiling on how many messages one summary will look at. */
 const MAX_WINDOW = 200;
@@ -228,40 +228,5 @@ Return JSON:
     return { ok: true, title, uid: result.uid, hidden, book: lorebook };
 }
 
-/**
- * Insert the summary into the chat in place of what it covers.
- *
- * ⚠️ Posted as a SYSTEM message (is_system: true) on purpose: SillyTavern
- * excludes system messages from the prompt, and the summary already reaches
- * context through its lorebook entry. Posting it as a normal message would put
- * the same text in twice.
- */
-async function postSummaryMarker(title, summaryText, hiddenRange) {
-    try {
-        const context = getContext();
-        if (typeof context.addOneMessage !== 'function') return;
-
-        const message = {
-            name: 'TunnelVision',
-            is_user: false,
-            is_system: true,
-            send_date: Date.now(),
-            mes: `📝 **${title.replace(/^\[Summary\]\s*/, '')}**\n\n${summaryText}`,
-            extra: {
-                isSmallSys: true,
-                tunnelvision_summary: true,
-                // The range this summary stands in for. summary-collapse.js reads
-                // this to fold those messages away behind a toggle, so the chat
-                // visibly matches what the model actually receives.
-                tv_hidden_range: hiddenRange || undefined,
-            },
-        };
-
-        context.chat.push(message);
-        await context.addOneMessage(message);
-        await context.saveChat?.();
-        applyCollapse();
-    } catch (e) {
-        console.error('[TunnelVision] Failed to post summary marker to chat:', e);
-    }
-}
+// postSummaryMarker lives in summary-collapse.js so the tool path can share it
+// without an import cycle. See the note there on why it is a system message.

@@ -147,6 +147,51 @@ export function applyCollapse() {
     });
 }
 
+/**
+ * Post a summary marker into the chat, standing in for the range it replaced.
+ *
+ * Lives here rather than in summary-runner so that BOTH summary paths can use
+ * it without an import cycle — the interval/slash-command path and the tool
+ * path used by the sidecar writer. A summary that hides messages without
+ * posting a marker leaves orphaned hidden messages: gone from the model's
+ * context, still on screen, with nothing explaining where they went.
+ *
+ * ⚠️ Posted as a SYSTEM message on purpose. SillyTavern excludes is_system
+ * messages from the prompt (script.js builds coreChat by filtering them out),
+ * and the summary already reaches context through its constant lorebook entry.
+ * A normal message would put the same text in the prompt twice.
+ *
+ * @param {string} title
+ * @param {string} summaryText
+ * @param {{start:number,end:number}|null} [hiddenRange]
+ */
+export async function postSummaryMarker(title, summaryText, hiddenRange) {
+    try {
+        const context = getContext();
+        if (typeof context.addOneMessage !== 'function') return;
+
+        const message = {
+            name: 'TunnelVision',
+            is_user: false,
+            is_system: true,
+            send_date: Date.now(),
+            mes: `📝 **${String(title).replace(/^\[Summary\]\s*/, '')}**\n\n${summaryText}`,
+            extra: {
+                isSmallSys: true,
+                tunnelvision_summary: true,
+                tv_hidden_range: hiddenRange || undefined,
+            },
+        };
+
+        context.chat.push(message);
+        await context.addOneMessage(message);
+        await context.saveChat?.();
+        applyCollapse();
+    } catch (e) {
+        console.error('[TunnelVision] Failed to post summary marker to chat:', e);
+    }
+}
+
 /** Put (or refresh) the toggle control on a summary marker message. */
 function renderToggle(markerId, range, isExpanded) {
     const block = document.querySelector(`#chat .mes[mesid="${markerId}"]`);

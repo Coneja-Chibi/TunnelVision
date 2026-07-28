@@ -19,6 +19,7 @@ import { markAutoSummaryComplete } from '../auto-summary.js';
 import { getLanguageInstruction } from '../agent-utils.js';
 import { getContext } from '../../../../st-context.js';
 import { hideChatMessageRange } from '../../../../chats.js';
+import { postSummaryMarker } from '../summary-collapse.js';
 
 export const TOOL_NAME = 'TunnelVision_Summarize';
 export const COMPACT_DESCRIPTION = 'Create a scene or event summary to preserve significant narrative beats in long-term memory.';
@@ -105,7 +106,7 @@ function getSummarizedHideRange(messagesBack, overrideStart, overrideEnd) {
     return { start: hideStart, end: hideEnd, visibleCount, currentMsgId };
 }
 
-function setPendingSummaryHide(range) {
+function setPendingSummaryHide(range, summaryInfo) {
     if (!range) return;
     const context = getContext();
     if (!context.chatMetadata) return;
@@ -114,6 +115,11 @@ function setPendingSummaryHide(range) {
         end: range.end,
         visibleCount: range.visibleCount,
         currentMsgId: range.currentMsgId,
+        // Carried so the flush can post a chat marker for the range it hides.
+        // Without one, this path hides messages and leaves nothing on screen to
+        // explain where they went.
+        title: summaryInfo?.title,
+        summary: summaryInfo?.summary,
     };
     context.saveMetadataDebounced?.();
 }
@@ -170,6 +176,16 @@ export async function flushPendingSummaryHide() {
         await hideChatMessageRange(start, maxSafeEnd, false);
         setWatermark(maxSafeEnd);
         console.log(`[TunnelVision] Hid messages ${start}-${maxSafeEnd} (${visibleCount} visible) after final response`);
+
+        // Post a marker standing in for what was just hidden. This path used to
+        // hide silently, which left orphaned hidden messages — out of the model's
+        // context, still rendered, with nothing accounting for them. It also made
+        // the collapse fallback misattribute those messages to whichever later
+        // summary happened to sit above them.
+        if (pending.title) {
+            await postSummaryMarker(pending.title, pending.summary || '', { start, end: maxSafeEnd });
+        }
+
         return `Hidden ${visibleCount} summarized messages (${start}-${maxSafeEnd}).`;
     } catch (e) {
         console.error('[TunnelVision] Failed to flush pending summarized messages:', e);
@@ -350,7 +366,7 @@ When you notice related events forming a pattern or storyline, group them into "
                 // generation and can make the model continue from an old scene.
                 const hideRange = getSummarizedHideRange(args.messages_back);
                 if (hideRange) {
-                    setPendingSummaryHide(hideRange);
+                    setPendingSummaryHide(hideRange, { title: args.title, summary: args.summary });
                     response += ` ${hideRange.visibleCount} summarized messages will be hidden after the response.`;
                 }
 
