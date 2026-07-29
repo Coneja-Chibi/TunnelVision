@@ -96,6 +96,9 @@ export function bindUIEvents() {
     // Lorebook filter
     $('#tv_lorebook_filter').on('input', onLorebookFilter);
 
+    // Advanced settings filter
+    $('#tv_adv_search').on('input', onAdvancedFilter);
+
     // Advanced Settings collapsible header
     $('#tv_advanced_header').on('click', function () {
         $(this).toggleClass('expanded');
@@ -474,6 +477,102 @@ function onLorebookFilter() {
     $('#tv_lorebook_list .tv-lorebook-card').each(function () {
         const bookName = $(this).attr('data-book')?.toLowerCase() || '';
         $(this).toggle(!query || bookName.includes(query));
+    });
+}
+
+// Whether the panel is currently filtered. Used to snapshot the drawers' open
+// state on the way in, so clearing the box can put the panel back the way the
+// user had it rather than leaving everything expanded.
+let advSearchActive = false;
+
+function isDrawerOpen($drawer) {
+    return $drawer.find('> .inline-drawer-header .inline-drawer-icon').hasClass('up');
+}
+
+// Open or close a drawer without animating it. SillyTavern's own delegated
+// handler *toggles* the chevron classes, which is right for a click but wrong
+// here: filtering re-asserts the same state on every keystroke, so this sets
+// the classes instead — running it twice must not flip the chevron back.
+// .stop(true, true) finishes any slide already in flight, so a click landing
+// mid-filter can't leave the drawer half-open.
+function setDrawerOpen($drawer, open) {
+    $drawer.find('> .inline-drawer-content').stop(true, true).toggle(open);
+    $drawer.find('> .inline-drawer-header .inline-drawer-icon')
+        .toggleClass('up fa-circle-chevron-up', open)
+        .toggleClass('down fa-circle-chevron-down', !open);
+}
+
+// Collapsed Tree Depth is shown only in collapsed search mode, and that
+// visibility belongs to refreshUI/onSearchModeChange. The filter must not
+// reveal it, or searching would turn on a section the settings say is off.
+function isSectionSelectable($section) {
+    if ($section.attr('id') !== 'tv_collapsed_depth_section') return true;
+    return (getSettings().searchMode || 'traversal') === 'collapsed';
+}
+
+function sectionMatches($section, query) {
+    if ($section.text().toLowerCase().includes(query)) return true;
+    // Placeholders are attributes, so .text() never sees them, and several
+    // settings are identifiable mainly by their example value.
+    return $section.find('[placeholder]').toArray().some(
+        el => (el.getAttribute('placeholder') || '').toLowerCase().includes(query));
+}
+
+function restoreAdvancedPanel() {
+    const $body = $('.tv-advanced-body');
+    $body.find('.tv-adv-section').show();
+    $('#tv_collapsed_depth_section').toggle((getSettings().searchMode || 'traversal') === 'collapsed');
+    $body.find('.tv-adv-group, .tv-adv-section.inline-drawer').each(function () {
+        const $drawer = $(this);
+        const wasOpen = $drawer.data('tvPreSearchOpen');
+        if (wasOpen !== undefined) setDrawerOpen($drawer, wasOpen);
+        $drawer.removeData('tvPreSearchOpen');
+    });
+}
+
+// Filter the advanced panel by section title and body text. Categories start
+// collapsed, so find-in-page can't reach a setting whose category the user
+// can't name — which is the problem this box exists to solve. A matched
+// section is force-opened for the same reason: a hit in help text inside a
+// closed drawer would still be invisible.
+function onAdvancedFilter() {
+    const query = ($('#tv_adv_search').val() || '').toLowerCase().trim();
+    const $body = $('.tv-advanced-body');
+
+    if (!query) {
+        if (advSearchActive) {
+            restoreAdvancedPanel();
+            advSearchActive = false;
+        }
+        return;
+    }
+
+    if (!advSearchActive) {
+        $body.find('.tv-adv-group, .tv-adv-section.inline-drawer').each(function () {
+            $(this).data('tvPreSearchOpen', isDrawerOpen($(this)));
+        });
+        advSearchActive = true;
+    }
+
+    $body.find('.tv-adv-group').each(function () {
+        const $group = $(this);
+        // A category title match shows everything under it, so a user who does
+        // remember the category gets the whole group rather than nothing.
+        const groupHit = $group.find('> .tv-adv-group-title').text().toLowerCase().includes(query);
+        let hits = 0;
+
+        $group.find('.tv-adv-section').each(function () {
+            const $section = $(this);
+            const hit = (groupHit || sectionMatches($section, query)) && isSectionSelectable($section);
+            $section.toggle(hit);
+            if (!hit) return;
+            hits++;
+            if ($section.hasClass('inline-drawer')) setDrawerOpen($section, true);
+        });
+
+        // Groups with no hits collapse rather than disappear, so the shape of
+        // the panel stays legible while filtered.
+        setDrawerOpen($group, hits > 0);
     });
 }
 
