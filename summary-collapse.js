@@ -224,8 +224,16 @@ function renderToggle(markerId, range, isExpanded) {
         host.appendChild(toggle);
     }
 
-    const count = range.end - range.start + 1;
+    // Count what actually collapses, not the raw span: a previous summary's
+    // marker can sit inside this range and is deliberately never collapsed, so
+    // the span would overstate the number by one per marker it contains.
+    const chat = getContext()?.chat;
+    let count = 0;
+    for (let j = range.start; j <= range.end; j++) {
+        if (chat?.[j]?.is_system && !chat[j]?.extra?.tunnelvision_summary) count++;
+    }
+
     toggle.textContent = isExpanded
-        ? `▾ hide the ${count} summarized messages again`
-        : `▸ show the ${count} messages this replaced`;
+        ? `▾ hide ${count} summarized messages`
+        : `▸ show ${count} hidden messages`;
 }
