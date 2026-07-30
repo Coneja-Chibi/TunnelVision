@@ -27,7 +27,7 @@
  * hiding.
  */
 
-import { eventSource, event_types } from '../../../../script.js';
+import { eventSource, event_types, updateViewMessageIds } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
 
 const STYLE_ID = 'tv-summary-collapse-style';
@@ -196,8 +196,38 @@ export async function postSummaryMarker(title, summaryText, hiddenRange) {
             },
         };
 
-        context.chat.push(message);
-        await context.addOneMessage(message);
+        // Place the marker immediately after the range it stands in for, not at
+        // the end of the chat.
+        //
+        // Summarising deliberately leaves the newest messages alone, and those
+        // are correctly still visible — they are the live scene. But appending
+        // the marker put it BELOW them, so the chat read
+        // [collapsed range][live messages][summary]: a summary arriving after
+        // messages it does not cover, which looks like the sweep missed them.
+        // Inserting after the range gives [collapsed range][summary][live
+        // messages] — the summary, then the scene continuing from it.
+        //
+        // Safe for the index-based ranges: everything already recorded (previous
+        // ranges, the watermark) is <= hiddenRange.end, so only the kept-recent
+        // tail shifts, and nothing refers to it by index.
+        const insertAt = hiddenRange && Number.isFinite(hiddenRange.end)
+            ? hiddenRange.end + 1
+            : context.chat.length;
+
+        if (insertAt < context.chat.length) {
+            context.chat.splice(insertAt, 0, message);
+            await context.addOneMessage(message, { insertAfter: hiddenRange.end });
+            // ⚠️ REQUIRED after a mid-chat insert. addOneMessage puts the element
+            // in the right place but does not renumber the ones after it, so
+            // every following .mes keeps a mesid that is now one too low —
+            // duplicates at the insertion point, gaps at the end. Anything that
+            // maps DOM to chat by mesid (this module's collapse, ST's own edit,
+            // swipe and delete) then acts on the wrong message.
+            updateViewMessageIds();
+        } else {
+            context.chat.push(message);
+            await context.addOneMessage(message);
+        }
         await context.saveChat?.();
         applyCollapse();
     } catch (e) {
