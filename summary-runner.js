@@ -26,6 +26,7 @@ import {
     hideSummarizedMessages,
     getWatermark,
 } from './tools/summarize.js';
+import { applyCollapse } from './summary-collapse.js';
 
 /** Hard ceiling on how many messages one summary will look at. */
 const MAX_WINDOW = 200;
@@ -204,21 +205,24 @@ Return JSON:
 
     console.log(`[TunnelVision] Summary (${source}) saved as UID ${result.uid} covering messages ${window.start}-${window.end}`);
 
-    // Put a marker in the chat where the scene was.
-    const shouldPost = postToChat !== undefined ? postToChat : settings.summaryPostToChat !== false;
-    if (shouldPost) {
-        await postSummaryMarker(title, String(parsed.summary).trim());
-    }
-
-    // Hide the range we actually summarized. Keep the most recent message
+    // Hide the summarized range FIRST, so the marker we post afterwards can
+    // carry that range and collapse it in the UI. Keep the most recent message
     // visible so the scene still has a live tail to continue from.
     let hidden = null;
+    let hiddenRange = null;
     const shouldHide = hide !== undefined ? hide : settings.autoHideSummarized !== false;
     if (shouldHide) {
         const hideEnd = Math.min(window.end, (getContext().chat?.length ?? 1) - 2);
         if (hideEnd >= window.start) {
             hidden = await hideSummarizedMessages(undefined, window.start, hideEnd);
+            if (hidden) hiddenRange = { start: window.start, end: hideEnd };
         }
+    }
+
+    // Put a marker in the chat standing in for the scene it replaced.
+    const shouldPost = postToChat !== undefined ? postToChat : settings.summaryPostToChat !== false;
+    if (shouldPost) {
+        await postSummaryMarker(title, String(parsed.summary).trim(), hiddenRange);
     }
 
     return { ok: true, title, uid: result.uid, hidden, book: lorebook };
@@ -232,7 +236,7 @@ Return JSON:
  * context through its lorebook entry. Posting it as a normal message would put
  * the same text in twice.
  */
-async function postSummaryMarker(title, summaryText) {
+async function postSummaryMarker(title, summaryText, hiddenRange) {
     try {
         const context = getContext();
         if (typeof context.addOneMessage !== 'function') return;
@@ -243,12 +247,20 @@ async function postSummaryMarker(title, summaryText) {
             is_system: true,
             send_date: Date.now(),
             mes: `📝 **${title.replace(/^\[Summary\]\s*/, '')}**\n\n${summaryText}`,
-            extra: { isSmallSys: true, tunnelvision_summary: true },
+            extra: {
+                isSmallSys: true,
+                tunnelvision_summary: true,
+                // The range this summary stands in for. summary-collapse.js reads
+                // this to fold those messages away behind a toggle, so the chat
+                // visibly matches what the model actually receives.
+                tv_hidden_range: hiddenRange || undefined,
+            },
         };
 
         context.chat.push(message);
         await context.addOneMessage(message);
         await context.saveChat?.();
+        applyCollapse();
     } catch (e) {
         console.error('[TunnelVision] Failed to post summary marker to chat:', e);
     }
