@@ -25,11 +25,19 @@ import {
     ensureSummariesNode,
     hideSummarizedMessages,
     getWatermark,
+    firstSummarizableIndex,
 } from './tools/summarize.js';
 import { postSummaryMarker } from './summary-collapse.js';
 
 /** Hard ceiling on how many messages one summary will look at. */
 const MAX_WINDOW = 200;
+
+/**
+ * How many of the newest messages a summary leaves alone, when
+ * `summaryKeepRecent` is not set. Never less than 1 — hiding the whole visible
+ * chat would leave the model with no live scene to continue from.
+ */
+const DEFAULT_KEEP_RECENT = 2;
 
 /**
  * Collect the messages this summary should cover.
@@ -49,6 +57,7 @@ function collectChatWindow(fallbackCount) {
     const chat = context?.chat;
     if (!chat || chat.length === 0) return null;
 
+    const settings = getSettings();
     const lastIndex = chat.length - 1;
     const watermark = getWatermark();
 
@@ -56,10 +65,19 @@ function collectChatWindow(fallbackCount) {
         ? watermark + 1
         : Math.max(0, chat.length - fallbackCount);
 
-    // Never swallow the opening message/greeting.
-    if (start < 1) start = chat.length > 1 ? 1 : 0;
+    // Never swallow the opening messages. In a group that is one greeting per
+    // member, so guarding index 0 alone would eat every greeting but the first.
+    const openingEnd = firstSummarizableIndex(chat);
+    if (start < openingEnd) start = openingEnd;
 
-    const end = Math.min(lastIndex, start + MAX_WINDOW - 1);
+    // Leave the most recent messages alone: they are the live scene, and
+    // summarising what is still on screen reads as the summary running ahead of
+    // the conversation. This is also what keeps the window and the hidden range
+    // identical — previously the window ran one past the hidden range, so the
+    // newest message was summarised once here and again in the next summary.
+    const keepRecent = Math.max(1, Number(settings.summaryKeepRecent ?? DEFAULT_KEEP_RECENT) || DEFAULT_KEEP_RECENT);
+
+    const end = Math.min(lastIndex - keepRecent, start + MAX_WINDOW - 1);
     if (start > end) return null;
 
     const lines = [];
@@ -212,6 +230,9 @@ Return JSON:
     let hiddenRange = null;
     const shouldHide = hide !== undefined ? hide : settings.autoHideSummarized !== false;
     if (shouldHide) {
+        // The window already excludes the kept-recent messages, so hide exactly
+        // what was summarised. The `length - 2` term is only a floor for the case
+        // where the chat shrank while the summary was generating.
         const hideEnd = Math.min(window.end, (getContext().chat?.length ?? 1) - 2);
         if (hideEnd >= window.start) {
             hidden = await hideSummarizedMessages(undefined, window.start, hideEnd);

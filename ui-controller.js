@@ -180,6 +180,8 @@ export function bindUIEvents() {
     // Auto-summary settings
     $('#tv_auto_summary_enabled').on('change', onAutoSummaryToggle);
     $('#tv_auto_summary_interval').on('change', onAutoSummaryIntervalChange);
+    $('#tv_summary_keep_recent').on('change', onSummaryKeepRecentChange);
+    $('#tv_summarize_opening_messages').on('change', onSummarizeOpeningMessagesToggle);
     $('#tv_auto_hide_summarized').on('change', onAutoHideSummarizedToggle);
     $('#tv_passthrough_constant').on('change', onPassthroughConstantToggle);
     $('#tv_allow_keyword_triggers').on('change', onAllowKeywordTriggersToggle);
@@ -403,6 +405,8 @@ export function refreshUI() {
     $('#tv_auto_summary_enabled').prop('checked', autoEnabled);
     $('#tv_auto_summary_options').toggle(autoEnabled);
     $('#tv_auto_summary_interval').val(settings.autoSummaryInterval ?? 20);
+    $('#tv_summary_keep_recent').val(settings.summaryKeepRecent ?? 2);
+    $('#tv_summarize_opening_messages').prop('checked', settings.summarizeOpeningMessages === true);
     $('#tv_auto_summary_count').text(getAutoSummaryCount());
     $('#tv_auto_hide_summarized').prop('checked', settings.autoHideSummarized !== false);
     $('#tv_passthrough_constant').prop('checked', settings.passthroughConstant !== false);
@@ -1029,6 +1033,24 @@ function onAutoSummaryIntervalChange() {
     $('#tv_auto_summary_interval').val(clamped);
     const settings = getSettings();
     settings.autoSummaryInterval = clamped;
+    saveSettingsDebounced();
+}
+
+function onSummaryKeepRecentChange() {
+    const raw = Number($('#tv_summary_keep_recent').val());
+    // Floor of 1: at 0 a summary would hide the whole visible chat, leaving the
+    // model nothing live to continue from.
+    const clamped = Math.min(Math.max(Math.round(raw) || 2, 1), 20);
+    $('#tv_summary_keep_recent').val(clamped);
+    const settings = getSettings();
+    settings.summaryKeepRecent = clamped;
+    saveSettingsDebounced();
+}
+
+function onSummarizeOpeningMessagesToggle() {
+    const enabled = $(this).prop('checked');
+    const settings = getSettings();
+    settings.summarizeOpeningMessages = enabled;
     saveSettingsDebounced();
 }
 

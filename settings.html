@@ -720,6 +720,22 @@
                                     Messages since last summary: <strong id="tv_auto_summary_count">0</strong>
                                 </div>
                             </div>
+                            <div class="tv-number-row" style="margin-top: 8px;">
+                                <label class="tv-number-label" for="tv_summary_keep_recent">Exclude:</label>
+                                <input id="tv_summary_keep_recent" type="number" class="tv-number-input" min="1" max="20" step="1" value="2" />
+                                <span class="tv-number-label">newest messages</span>
+                            </div>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                The most recent messages are the live scene. They are neither summarised nor hidden, so the summary never runs ahead of the conversation.
+                            </div>
+                            <label class="tv-toggle" style="margin-top: 8px;">
+                                <input id="tv_summarize_opening_messages" type="checkbox" />
+                                <span class="tv-toggle-slider"></span>
+                                <span class="tv-toggle-label">Summarize opening messages</span>
+                            </label>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                Off by default: everything before your first message is the greeting — one per character in a group chat — and is left visible. Turn on to fold those into summaries as well.
+                            </div>
                             <label class="tv-toggle" style="margin-top: 8px;">
                                 <input id="tv_auto_hide_summarized" type="checkbox" />
                                 <span class="tv-toggle-slider"></span>

@@ -48,6 +48,33 @@ export function setWatermark(messageId) {
 }
 
 /**
+ * The lowest message index a summary may cover.
+ *
+ * Everything before the first user message is opening material — a character's
+ * greeting, and in a GROUP chat one greeting per member. By default those are
+ * left alone: they set the scene, and they are the part of the chat a reader is
+ * most likely to scroll back to.
+ *
+ * ⚠️ Index 0 alone is NOT the right guard, which is what this replaces. It
+ * protects a single-character greeting but silently swallows every group
+ * member's greeting except the first, so a two-hander opens with one greeting
+ * visible and the other summarised away — the opening looks half-eaten.
+ *
+ * Set `summarizeOpeningMessages` to fold them in like any other message.
+ *
+ * @param {Array} chat
+ * @returns {number} Lowest index a summary may start at.
+ */
+export function firstSummarizableIndex(chat) {
+    if (!Array.isArray(chat)) return 1;
+    if (getSettings()?.summarizeOpeningMessages === true) return 0;
+    for (let i = 0; i < chat.length; i++) {
+        if (chat[i]?.is_user) return i;
+    }
+    return chat.length;
+}
+
+/**
  * Compute the message range that can be hidden after a summary.
  * @param {number|undefined} messagesBack - How many messages back the summary covers.
  * @param {number|undefined} overrideStart - Explicit start message ID (used by auto-summary).
@@ -92,8 +119,10 @@ function getSummarizedHideRange(messagesBack, overrideStart, overrideEnd) {
 
     // Sanity checks
     if (hideStart > hideEnd || hideStart < 0 || hideEnd < 0) return null;
-    // Don't hide message 0 (first message / greeting)
-    if (hideStart === 0) hideStart = 1;
+    // Never hide the opening messages — in a group that is one greeting per
+    // member, not just index 0.
+    const openingEnd = firstSummarizableIndex(chat);
+    if (hideStart < openingEnd) hideStart = openingEnd;
     if (hideStart > hideEnd) return null;
 
     // Don't re-hide already hidden messages — count only visible ones
