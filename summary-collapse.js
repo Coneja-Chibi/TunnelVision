@@ -134,7 +134,20 @@ export function applyCollapse() {
             for (let j = range.start; j <= range.end; j++) {
                 // Only collapse what is actually hidden — if the user unhid a
                 // message by hand, respect that and leave it visible.
-                if (chat[j]?.is_system) shouldCollapse.add(j);
+                //
+                // ...and never collapse ANOTHER summary's marker. A marker is
+                // is_system, so it matches the test above, but its own toggle is
+                // rendered on it: collapsing it hides the only control that could
+                // expand that summary, leaving it unreachable.
+                //
+                // Every range after the first contains the previous marker, by
+                // arithmetic rather than by chance: hideEnd is window.end - 1, so
+                // one message is always left visible as a live tail and the marker
+                // lands at hideEnd + 2, while the next window starts at
+                // watermark + 1 = hideEnd + 1 — one index before it.
+                if (chat[j]?.is_system && !chat[j]?.extra?.tunnelvision_summary) {
+                    shouldCollapse.add(j);
+                }
             }
         }
         renderToggle(i, range, isExpanded);
