@@ -2839,3 +2839,21 @@ details.tv-confirm-diff-wrap[open] .tv-confirm-diff-summary::before { content: '
     opacity: 0.65;
     margin-left: 6px;
 }
+
+/* Clear button for the advanced-settings filter. A flex sibling of the input,
+   so it sits at the right-hand end of the box; shown only when there is text to
+   clear. */
+.tv-adv-search-clear {
+    display: none;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0.6;
+}
+
+.tv-adv-search-clear:hover {
+    opacity: 1;
+}
+
+.tv-adv-search-clear.tv-visible {
+    display: inline-block;
+}

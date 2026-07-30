@@ -98,6 +98,12 @@ export function bindUIEvents() {
 
     // Advanced settings filter
     $('#tv_adv_search').on('input', onAdvancedFilter);
+    $('#tv_adv_search_clear').on('click', function () {
+        $('#tv_adv_search').val('').trigger('input').trigger('focus');
+    });
+    // Sections nobody filed into a category render at the bottom, below the
+    // categories. See moveUngroupedSectionsToEnd().
+    moveUngroupedSectionsToEnd();
 
     // Advanced Settings collapsible header
     $('#tv_advanced_header').on('click', function () {
@@ -518,6 +524,35 @@ function sectionMatches($section, query) {
         el => (el.getAttribute('placeholder') || '').toLowerCase().includes(query));
 }
 
+/**
+ * Move any section that is not inside a category to the bottom of the panel.
+ *
+ * The categories are plain markup, so a section only joins one by being written
+ * inside it. Anything else is left ungrouped ON PURPOSE rather than being swept
+ * into a catch-all: sitting outside the categories may well be deliberate, and
+ * inventing an "Other" drawer would override that choice. Collecting them at the
+ * bottom just stops an ungrouped section appearing between two categories, where
+ * it reads as though it belongs to one of them.
+ *
+ * Ungrouped sections are still searchable — see onAdvancedFilter.
+ *
+ * Note `.tv-adv-section` is matched as a class token, so `.tv-adv-section-title`
+ * elements are not selected.
+ */
+function moveUngroupedSectionsToEnd() {
+    const $body = $('.tv-advanced-body');
+    if (!$body.length) return;
+    const $orphans = ungroupedSections($body);
+    if ($orphans.length) $body.append($orphans);
+}
+
+/** Sections that belong to no category. */
+function ungroupedSections($body) {
+    return $body.find('.tv-adv-section').filter(function () {
+        return $(this).closest('.tv-adv-group').length === 0;
+    });
+}
+
 function restoreAdvancedPanel() {
     const $body = $('.tv-advanced-body');
     $body.find('.tv-adv-section').show();
@@ -538,6 +573,8 @@ function restoreAdvancedPanel() {
 function onAdvancedFilter() {
     const query = ($('#tv_adv_search').val() || '').toLowerCase().trim();
     const $body = $('.tv-advanced-body');
+
+    $('#tv_adv_search_clear').toggleClass('tv-visible', query.length > 0);
 
     if (!query) {
         if (advSearchActive) {
@@ -573,6 +610,17 @@ function onAdvancedFilter() {
         // Groups with no hits collapse rather than disappear, so the shape of
         // the panel stays legible while filtered.
         setDrawerOpen($group, hits > 0);
+    });
+
+    // Ungrouped sections are filtered too. Without this they are never visited —
+    // the loop above only reaches sections inside a category — so an ungrouped
+    // section would sit there fully visible while everything else filtered away,
+    // which reads as the filter being broken.
+    ungroupedSections($body).each(function () {
+        const $section = $(this);
+        const hit = sectionMatches($section, query) && isSectionSelectable($section);
+        $section.toggle(hit);
+        if (hit && $section.hasClass('inline-drawer')) setDrawerOpen($section, true);
     });
 }
 
