@@ -27,6 +27,8 @@ import { getActiveTunnelVisionBooks, resolveTargetBook } from './tool-registry.j
 import { ingestChatMessages } from './tree-builder.js';
 import { createEntry, mergeEntries, splitEntry, forgetEntry, updateEntry, findEntryByUid } from './entry-manager.js';
 import { generateAnalytical, getStoryContext, trigramSimilarity } from './agent-utils.js';
+import { runSummary } from './summary-runner.js';
+import { markAutoSummaryComplete } from './auto-summary.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -329,59 +331,34 @@ async function handleSummarize(_namedArgs, unnamedArg, { activeBooks }) {
     const bookName = resolveAccessibleBook(activeBooks, 'write', 'summarize');
     if (!bookName) return;
 
-    const { book: lorebook, error } = resolveTargetBook(bookName, { checkWrite: true });
-    if (error) {
-        toastr.error(error, 'TunnelVision');
-        return;
-    }
-
-    const titleHint = String(unnamedArg || '').trim() || 'Recent events';
-    const messageCount = getContextMessages();
-    const recentChat = getRecentChat(messageCount);
-
-    if (!recentChat) {
-        toastr.warning('No chat messages to summarize.', 'TunnelVision');
-        return;
-    }
-
     toastr.info('Creating summary...', 'TunnelVision');
 
-    const storyCtx = getStoryContext();
-    const prompt = `${storyCtx ? storyCtx + '\n\n' : ''}Summarize the following conversation for a creative writing lorebook.
-Write in third person, past tense, capturing key actions, decisions, emotional beats, and plot developments.
-
-Topic/title hint: "${titleHint}"
-
-RECENT CONVERSATION:
-${recentChat}
-
-Return JSON:
-{
-  "title": "[Summary] <concise descriptive title>",
-  "summary": "<thorough third-person past-tense summary>",
-  "significance": "minor|moderate|major|critical"
-}`;
-
-    const response = await generateAnalytical({ prompt });
-    const parsed = parseJSON(response);
-
-    if (!parsed?.title || !parsed?.summary) {
-        toastr.error('Failed to create summary — could not parse LLM response.', 'TunnelVision');
+    // Shared implementation — same path interval auto-summary uses, so the two
+    // cannot drift. It files the entry under the Summaries node, guarantees the
+    // entry has usable keywords, posts a marker in the chat and hides the range
+    // it covered. The old inline version did none of those: it created the entry
+    // with `keys: []` and no node, producing an unfiled entry that could never fire.
+    let result;
+    try {
+        result = await runSummary({
+            titleHint: String(unnamedArg || '').trim(),
+            source: 'command',
+        });
+    } catch (e) {
+        toastr.error(`Failed to create summary: ${e.message}`, 'TunnelVision');
         return;
     }
 
-    try {
-        const sig = parsed.significance || 'moderate';
-        const content = `[Scene Summary — ${sig}]\n\n${parsed.summary.trim()}`;
-        const result = await createEntry(lorebook, {
-            content,
-            comment: parsed.title,
-            keys: [],
-        });
-        toastr.success(`Summary saved: "${result.comment}" (UID ${result.uid})`, 'TunnelVision');
-    } catch (e) {
-        toastr.error(`Failed to save summary: ${e.message}`, 'TunnelVision');
+    if (!result.ok) {
+        toastr.warning(result.reason || 'Nothing to summarize.', 'TunnelVision');
+        return;
     }
+
+    markAutoSummaryComplete();
+
+    let msg = `Summary saved: "${result.title}" (UID ${result.uid})`;
+    if (result.hidden) msg += ` — ${result.hidden}`;
+    toastr.success(msg, 'TunnelVision');
 }
 
 async function handleForget(_namedArgs, unnamedArg, { activeBooks }) {

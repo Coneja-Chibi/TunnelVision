@@ -31,6 +31,7 @@ import { bindUIEvents, refreshUI } from './ui-controller.js';
 import { initActivityFeed } from './activity-feed.js';
 import { initCommands } from './commands.js';
 import { initAutoSummary } from './auto-summary.js';
+import { initSummaryCollapse } from './summary-collapse.js';
 import { initPostTurnProcessor } from './post-turn-processor.js';
 import { initWorldState } from './world-state.js';
 import { initSmartContext } from './smart-context.js';
@@ -80,6 +81,7 @@ async function init() {
 
     // Wire up auto-summary interval tracking
     initAutoSummary();
+    initSummaryCollapse();
 
     // Wire up post-turn processor (tracker updates, fact extraction, scene archiving)
     initPostTurnProcessor();

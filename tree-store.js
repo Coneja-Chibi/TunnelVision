@@ -303,6 +303,12 @@ export const SETTING_DEFAULTS = {
     ephemeralToolFilter: ['TunnelVision_Search', 'TunnelVision_Summarize', 'TunnelVision_MergeSplit'],
     stealthMode: false,
     autoHideSummarized: true,
+    // Newest messages a summary leaves alone. Minimum 1 — summarising the whole
+    // visible chat leaves the model no live scene to continue from.
+    summaryKeepRecent: 2,
+    // Fold the opening greetings (one per member in a group) into summaries too.
+    // Off by default: they set the scene and are what a reader scrolls back to.
+    summarizeOpeningMessages: false,
     passthroughConstant: true,
     allowKeywordTriggers: false,
     autoDetectPattern: '',

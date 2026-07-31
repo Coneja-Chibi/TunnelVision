@@ -9,6 +9,7 @@ import { eventSource, event_types, setExtensionPrompt, extension_prompt_types } 
 import { getContext } from '../../../st-context.js';
 import { getSettings } from './tree-store.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
+import { runSummary } from './summary-runner.js';
 
 const TV_AUTOSUMMARY_KEY = 'tunnelvision_autosummary';
 const TV_AUTOSUMMARY_COUNTER_KEY = 'tunnelvision_autosummary_counter';
@@ -27,9 +28,10 @@ export function initAutoSummary() {
     // may not fire again for a chat that was loaded before this ran).
     hydrateCounterFromMetadata();
 
-    // Count user+AI messages
+    // Count user+AI messages. Only the AI-reply event may TRIGGER a run — firing
+    // on MESSAGE_SENT would summarize a turn that has not been answered yet.
     if (event_types.MESSAGE_RECEIVED) {
-        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceivedAndMaybeRun);
     }
     // Also count user messages sent
     if (event_types.MESSAGE_SENT) {
@@ -65,44 +67,64 @@ function onMessageReceived() {
     persistCounter(chatId, count);
 }
 
+/**
+ * ⚠️ This used to inject an [AUTO-SUMMARY INSTRUCTION] telling the CHAT model it
+ * MUST call TunnelVision_Summarize. That only ever worked when the host had
+ * function calling enabled; with it off (a supported, commonly recommended
+ * configuration) the request carries no tools array, the model cannot comply,
+ * and it types the tool call into the scene as narrative text instead.
+ *
+ * Auto-summary now performs the summary itself via the analytical connection
+ * (see summary-runner.js), so it no longer depends on host tool support at all.
+ * This handler survives only to purge any stale injected prompt.
+ */
 function onGenerationForAutoSummary() {
+    clearPrompt();
+}
+
+/** True while a summary is in flight, so overlapping turns cannot double-fire. */
+let _summaryInFlight = false;
+
+/** Count the AI reply, then run a summary if the interval has been reached. */
+async function onMessageReceivedAndMaybeRun() {
+    onMessageReceived();
+    await maybeRunAutoSummary();
+}
+
+async function maybeRunAutoSummary() {
     const settings = getSettings();
-    if (!settings.autoSummaryEnabled || settings.globalEnabled === false) {
-        clearPrompt();
-        return;
-    }
+    if (!settings.autoSummaryEnabled || settings.globalEnabled === false) return;
+    if (_summaryInFlight) return;
 
     const chatId = getChatId();
     if (!chatId) return;
 
     const count = counters.get(chatId) || 0;
     const interval = settings.autoSummaryInterval || 20;
-    const activeBooks = getActiveTunnelVisionBooks();
-    if (activeBooks.length === 0) {
-        clearPrompt();
-        return;
-    }
+    if (count < interval) return;
 
-    if (count >= interval) {
-        // Don't inject if the Summarize tool is disabled — the model can't obey the instruction
-        const disabled = settings.disabledTools || {};
-        if (disabled['TunnelVision_Summarize']) {
-            console.warn('[TunnelVision] Auto-summary threshold reached but TunnelVision_Summarize is disabled. Skipping injection.');
-            clearPrompt();
-            return;
+    if (getActiveTunnelVisionBooks().length === 0) return;
+
+    _summaryInFlight = true;
+    pendingSummaries.set(chatId, { triggeredAt: count });
+    try {
+        console.log(`[TunnelVision] Auto-summary firing at ${count}/${interval} messages`);
+        const result = await runSummary({ source: 'auto' });
+        if (result.ok) {
+            toastr?.success?.(`Summary saved: "${result.title}" (UID ${result.uid})`, 'TunnelVision');
+            markAutoSummaryComplete();
+        } else {
+            // Do NOT reset the counter — a failed run should retry next turn
+            // rather than silently swallowing the interval.
+            console.warn(`[TunnelVision] Auto-summary did not run: ${result.reason}`);
+            pendingSummaries.delete(chatId);
         }
-
-        if (!pendingSummaries.has(chatId)) {
-            pendingSummaries.set(chatId, { triggeredAt: count });
-            console.log(`[TunnelVision] Auto-summary pending after ${count} messages`);
-        }
-
-        const prompt = `[AUTO-SUMMARY INSTRUCTION: ${count} messages have passed since the last summary. You MUST call TunnelVision_Summarize this turn to create a summary of recent events. Write a descriptive title and thorough summary of what has happened in the last ~${count} messages. After summarizing, continue responding to the user normally.]`;
-        setExtensionPrompt(TV_AUTOSUMMARY_KEY, prompt, extension_prompt_types.IN_PROMPT, 0);
-        return;
+    } catch (e) {
+        console.error('[TunnelVision] Auto-summary failed:', e);
+        pendingSummaries.delete(chatId);
+    } finally {
+        _summaryInFlight = false;
     }
-
-    clearPrompt();
 }
 
 function onChatChanged() {

@@ -89,7 +89,7 @@ function assertBackgroundEntryMutable(entry, source) {
  * @param {string} [params.tv_tracker] - Optional tracking keyword for sidecar auto-cleanup
  * @returns {Promise<{uid: number, comment: string, nodeLabel: string}>}
  */
-export async function createEntry(bookName, { content, comment, keys, nodeId, tv_tracker }) {
+export async function createEntry(bookName, { content, comment, keys, nodeId, tv_tracker, constant = false }) {
     if (!content || !content.trim()) {
         throw new Error('Entry content cannot be empty.');
     }
@@ -128,7 +128,12 @@ export async function createEntry(bookName, { content, comment, keys, nodeId, tv
     
     // TunnelVision-managed entries: disable keyword triggering since retrieval is tree-based
     newEntry.selective = false;
-    newEntry.constant = false;
+    // Callers may opt in to `constant` for entries that must ALWAYS be in context
+    // rather than waiting on tree retrieval — scene summaries, which stand in for
+    // chat messages that have been hidden, are the motivating case. A summary that
+    // only sometimes injects is worse than no summary, because the messages it
+    // replaced are already gone from the prompt.
+    newEntry.constant = constant === true;
     newEntry.disable = false;
 
     // 1. Persist lorebook to disk FIRST (assigns final server-side UID)
