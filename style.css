@@ -1048,6 +1048,42 @@
     letter-spacing: 0.3px;
 }
 
+/* Category rollups grouping the advanced sections. Larger and cooler-toned than
+   .tv-adv-section-title so the two levels read as a hierarchy rather than as
+   competing headings of the same rank. */
+.tv-adv-group {
+    margin-bottom: 8px;
+}
+
+.tv-adv-group-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--SmartThemeQuoteColor, #8ecae6);
+    padding: 6px 8px;
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 6px;
+    background: var(--black30a, rgba(0, 0, 0, 0.18));
+}
+
+.tv-adv-group-title:hover {
+    filter: brightness(1.15);
+}
+
+/* The sections inside a category are indented so membership is visible when
+   several categories are open at once. */
+.tv-adv-group > .inline-drawer-content {
+    padding: 8px 0 2px 10px;
+    border-left: 2px solid var(--SmartThemeBorderColor, #444);
+    margin-left: 6px;
+}
+
 .tv-adv-divider {
     border: none;
     border-top: 1px solid var(--SmartThemeBorderColor, #444);
@@ -2792,3 +2828,32 @@ details.tv-confirm-diff-wrap[open] .tv-confirm-diff-summary::before { content: '
 .tv-tool-prompt-textarea { width: 100%; min-height: 80px; resize: vertical; font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 8px; color: inherit; line-height: 1.4; }
 .tv-tool-prompt-textarea:focus { border-color: rgba(255,255,255,0.25); outline: none; }
 .tv-tool-prompt-modified { border-left: 3px solid var(--SmartThemeQuoteColor, #e8a66d); }
+
+/* Subtitle riding alongside a category title — normal weight and dimmed so it
+   reads as explanation, not as part of the heading. */
+.tv-adv-group-sub {
+    font-size: 10px;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    opacity: 0.65;
+    margin-left: 6px;
+}
+
+/* Clear button for the advanced-settings filter. A flex sibling of the input,
+   so it sits at the right-hand end of the box; shown only when there is text to
+   clear. */
+.tv-adv-search-clear {
+    display: none;
+    cursor: pointer;
+    padding: 0 2px;
+    opacity: 0.6;
+}
+
+.tv-adv-search-clear:hover {
+    opacity: 1;
+}
+
+.tv-adv-search-clear.tv-visible {
+    display: inline-block;
+}
