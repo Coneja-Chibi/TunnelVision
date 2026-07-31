@@ -541,12 +541,27 @@
                                 <span id="tv_dedup_method_text">Checking...</span>
                             </div>
                             <div class="tv-help-text" style="margin-top: 4px;">
-                                Uses trigram similarity — fast character n-gram matching that catches near-duplicates and morphological variants. No external dependencies needed.
+                                Uses <strong>embedding similarity</strong> when an Embedding Sidecar is configured — this catches duplicates that were reworded. Falls back to <strong>trigram</strong> (character n-gram) matching otherwise, which only catches near-identical text.
                             </div>
                             <div id="tv_dedup_threshold_row" class="tv-number-row" style="margin-top: 8px; display: none;">
-                                <label class="tv-number-label" for="tv_dedup_threshold">Similarity threshold:</label>
+                                <label class="tv-number-label" for="tv_dedup_threshold">Embedding threshold:</label>
                                 <input id="tv_dedup_threshold" type="number" class="tv-number-input" min="0.5" max="0.99" step="0.01" value="0.85" />
-                                <span class="tv-help-text" style="margin: 0;">(0.85 = high similarity)</span>
+                                <span class="tv-help-text" style="margin: 0;">(cosine — 0.85 = same meaning)</span>
+                            </div>
+                            <div id="tv_trigram_threshold_row" class="tv-number-row" style="margin-top: 8px; display: none;">
+                                <label class="tv-number-label" for="tv_trigram_threshold">Trigram threshold:</label>
+                                <input id="tv_trigram_threshold" type="number" class="tv-number-input" min="0.2" max="0.99" step="0.01" value="0.6" />
+                                <span class="tv-help-text" style="margin: 0;">(character overlap — 0.85 here means "nearly the same string", so it wants a lower value than the embedding threshold)</span>
+                            </div>
+                            <div id="tv_dedup_mode_row" style="margin-top: 10px; display: none;">
+                                <label class="tv-number-label" for="tv_remember_dedup_mode">On duplicate:</label>
+                                <select id="tv_remember_dedup_mode" class="tv-select" style="width: auto; margin-left: 6px;">
+                                    <option value="warn">Warn, save anyway</option>
+                                    <option value="redirect">Decline, tell the AI to update instead</option>
+                                </select>
+                                <div class="tv-help-text" style="margin-top: 4px;">
+                                    <strong>Warn</strong> is the original behaviour: the entry is always written and a note is appended afterwards — by which point the duplicate exists, so it is easily ignored. <strong>Decline</strong> refuses the write and returns the matching UIDs so the AI must call Update, with <code>force=true</code> available when the new information really is distinct.
+                                </div>
                             </div>
                         </div>
 

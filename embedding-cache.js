@@ -248,6 +248,62 @@ async function ensureEmbeddings(candidates) {
 // ── Similarity Scoring ───────────────────────────────────────────
 
 /**
+ * Find candidates whose embedding cosine against `text` meets `threshold`.
+ *
+ * Shares the entry cache with the smart-context pipeline, so callers pay for one
+ * embedding of `text` rather than re-embedding the book. Used by
+ * TunnelVision_Remember to catch reworded duplicates that character-trigram
+ * overlap cannot see.
+ *
+ * @param {Array<{entry: Object, bookName: string}>} candidates
+ * @param {string} text - The new text to compare against
+ * @param {number} threshold - 0-1 cosine threshold
+ * @param {number} [limit=3] - Maximum matches to return, highest first
+ * @returns {Promise<Array<{uid: number, comment: string, similarity: number}>>}
+ */
+export async function findSimilarByEmbedding(candidates, text, threshold, limit = 3) {
+  if (!candidates?.length || !text) return [];
+
+  await ensureEmbeddings(candidates);
+
+  let queryEmbedding;
+  try {
+    const embeddings = await computeEmbeddings([
+      text.substring(0, EMBEDDING_MAX_TEXT_LENGTH),
+    ]);
+    queryEmbedding = embeddings?.[0];
+  } catch (e) {
+    console.debug("[TunnelVision] Similarity query embedding failed:", e.message);
+    return [];
+  }
+  if (!queryEmbedding) return [];
+
+  const matches = [];
+  for (const c of candidates) {
+    const content = (c.entry.content || "").trim();
+    const entryText = ((c.entry.comment || "") + " " + content).substring(
+      0, EMBEDDING_MAX_TEXT_LENGTH,
+    );
+    const entryEmbedding = getCachedEmbedding(
+      c.bookName, c.entry.uid, hashString(entryText),
+    );
+    if (!entryEmbedding) continue;
+
+    const similarity = cosineSimilarity(queryEmbedding, entryEmbedding);
+    if (similarity >= threshold) {
+      matches.push({
+        uid: c.entry.uid,
+        comment: c.entry.comment || `Entry #${c.entry.uid}`,
+        similarity: Math.round(similarity * 100),
+      });
+    }
+  }
+
+  matches.sort((a, b) => b.similarity - a.similarity);
+  return matches.slice(0, limit);
+}
+
+/**
  * Compute embedding similarity boosts for candidates against recent chat text.
  * Returns a Map of UID → bonus score (0–8 range).
  * @param {Array<{entry: Object, bookName: string, score: number}>} candidates
