@@ -1051,6 +1051,28 @@
                         
                                         </div>
                                     </div>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                Uses <strong>embedding similarity</strong> when an Embedding Sidecar is configured — this catches duplicates that were reworded. Falls back to <strong>trigram</strong> (character n-gram) matching otherwise, which only catches near-identical text.
+                            </div>
+                            <div id="tv_dedup_threshold_row" class="tv-number-row" style="margin-top: 8px; display: none;">
+                                <label class="tv-number-label" for="tv_dedup_threshold">Embedding threshold:</label>
+                                <input id="tv_dedup_threshold" type="number" class="tv-number-input" min="0.5" max="0.99" step="0.01" value="0.85" />
+                                <span class="tv-help-text" style="margin: 0;">(cosine — 0.85 = same meaning)</span>
+                            </div>
+                            <div id="tv_trigram_threshold_row" class="tv-number-row" style="margin-top: 8px; display: none;">
+                                <label class="tv-number-label" for="tv_trigram_threshold">Trigram threshold:</label>
+                                <input id="tv_trigram_threshold" type="number" class="tv-number-input" min="0.2" max="0.99" step="0.01" value="0.6" />
+                                <span class="tv-help-text" style="margin: 0;">(character overlap — 0.85 here means "nearly the same string", so it wants a lower value than the embedding threshold)</span>
+                            </div>
+                            <div id="tv_dedup_mode_row" style="margin-top: 10px; display: none;">
+                                <label class="tv-number-label" for="tv_remember_dedup_mode">On duplicate:</label>
+                                <select id="tv_remember_dedup_mode" class="tv-select" style="width: auto; margin-left: 6px;">
+                                    <option value="warn">Warn, save anyway</option>
+                                    <option value="redirect">Decline, tell the AI to update instead</option>
+                                </select>
+                                <div class="tv-help-text" style="margin-top: 4px;">
+                                    <strong>Warn</strong> is the original behaviour: the entry is always written and a note is appended afterwards — by which point the duplicate exists, so it is easily ignored. <strong>Decline</strong> refuses the write and returns the matching UIDs so the AI must call Update, with <code>force=true</code> available when the new information really is distinct.
+                                </div>
                             </div>
                         </div>
 
@@ -1109,6 +1131,51 @@
 
 
                         <!-- ═══ Auto-Summary ═══ -->
+                        <div class="tv-adv-section">
+                            <div class="tv-adv-section-title">Auto-Summary</div>
+                            <div class="tv-help-text" style="margin-bottom: 8px;">
+                                Automatically inject a summarize instruction every N messages. The AI will create a summary of recent events as part of its next response.
+                            </div>
+                            <label class="tv-toggle">
+                                <input id="tv_auto_summary_enabled" type="checkbox" />
+                                <span class="tv-toggle-slider"></span>
+                                <span class="tv-toggle-label">Enable auto-summary</span>
+                            </label>
+                            <div id="tv_auto_summary_options" style="display: none; margin-top: 8px;">
+                                <div class="tv-number-row">
+                                    <label class="tv-number-label" for="tv_auto_summary_interval">Interval:</label>
+                                    <input id="tv_auto_summary_interval" type="number" class="tv-number-input" min="5" max="200" step="5" value="20" />
+                                    <span class="tv-number-label">messages</span>
+                                </div>
+                                <div id="tv_auto_summary_counter" class="tv-help-text" style="margin-top: 4px;">
+                                    Messages since last summary: <strong id="tv_auto_summary_count">0</strong>
+                                </div>
+                            </div>
+                            <div class="tv-number-row" style="margin-top: 8px;">
+                                <label class="tv-number-label" for="tv_summary_keep_recent">Exclude:</label>
+                                <input id="tv_summary_keep_recent" type="number" class="tv-number-input" min="1" max="20" step="1" value="2" />
+                                <span class="tv-number-label">newest messages</span>
+                            </div>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                The most recent messages are the live scene. They are neither summarised nor hidden, so the summary never runs ahead of the conversation.
+                            </div>
+                            <label class="tv-toggle" style="margin-top: 8px;">
+                                <input id="tv_summarize_opening_messages" type="checkbox" />
+                                <span class="tv-toggle-slider"></span>
+                                <span class="tv-toggle-label">Summarize opening messages</span>
+                            </label>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                Off by default: everything before your first message is the greeting — one per character in a group chat — and is left visible. Turn on to fold those into summaries as well.
+                            </div>
+                            <label class="tv-toggle" style="margin-top: 8px;">
+                                <input id="tv_auto_hide_summarized" type="checkbox" />
+                                <span class="tv-toggle-slider"></span>
+                                <span class="tv-toggle-label">Auto-hide summarized messages</span>
+                            </label>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                When enabled, messages covered by a summary are hidden from chat to save tokens. Hidden messages can be restored with /unhide.
+                            </div>
+                        </div>
 
 
                         <!-- ═══ Constant Entry Passthrough ═══ -->

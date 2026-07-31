@@ -19,6 +19,7 @@ import { markAutoSummaryComplete } from '../auto-summary.js';
 import { getLanguageInstruction } from '../agent-utils.js';
 import { getContext } from '../../../../st-context.js';
 import { hideChatMessageRange } from '../../../../chats.js';
+import { postSummaryMarker } from '../summary-collapse.js';
 
 export const TOOL_NAME = 'TunnelVision_Summarize';
 export const COMPACT_DESCRIPTION = 'Create a scene or event summary to preserve significant narrative beats in long-term memory.';
@@ -44,6 +45,33 @@ export function getWatermark() {
 export function setWatermark(messageId) {
     const context = getContext();
     context.chatMetadata[WATERMARK_KEY] = messageId;
+}
+
+/**
+ * The lowest message index a summary may cover.
+ *
+ * Everything before the first user message is opening material — a character's
+ * greeting, and in a GROUP chat one greeting per member. By default those are
+ * left alone: they set the scene, and they are the part of the chat a reader is
+ * most likely to scroll back to.
+ *
+ * ⚠️ Index 0 alone is NOT the right guard, which is what this replaces. It
+ * protects a single-character greeting but silently swallows every group
+ * member's greeting except the first, so a two-hander opens with one greeting
+ * visible and the other summarised away — the opening looks half-eaten.
+ *
+ * Set `summarizeOpeningMessages` to fold them in like any other message.
+ *
+ * @param {Array} chat
+ * @returns {number} Lowest index a summary may start at.
+ */
+export function firstSummarizableIndex(chat) {
+    if (!Array.isArray(chat)) return 1;
+    if (getSettings()?.summarizeOpeningMessages === true) return 0;
+    for (let i = 0; i < chat.length; i++) {
+        if (chat[i]?.is_user) return i;
+    }
+    return chat.length;
 }
 
 /**
@@ -91,8 +119,10 @@ function getSummarizedHideRange(messagesBack, overrideStart, overrideEnd) {
 
     // Sanity checks
     if (hideStart > hideEnd || hideStart < 0 || hideEnd < 0) return null;
-    // Don't hide message 0 (first message / greeting)
-    if (hideStart === 0) hideStart = 1;
+    // Never hide the opening messages — in a group that is one greeting per
+    // member, not just index 0.
+    const openingEnd = firstSummarizableIndex(chat);
+    if (hideStart < openingEnd) hideStart = openingEnd;
     if (hideStart > hideEnd) return null;
 
     // Don't re-hide already hidden messages — count only visible ones
@@ -105,7 +135,7 @@ function getSummarizedHideRange(messagesBack, overrideStart, overrideEnd) {
     return { start: hideStart, end: hideEnd, visibleCount, currentMsgId };
 }
 
-function setPendingSummaryHide(range) {
+function setPendingSummaryHide(range, summaryInfo) {
     if (!range) return;
     const context = getContext();
     if (!context.chatMetadata) return;
@@ -114,6 +144,11 @@ function setPendingSummaryHide(range) {
         end: range.end,
         visibleCount: range.visibleCount,
         currentMsgId: range.currentMsgId,
+        // Carried so the flush can post a chat marker for the range it hides.
+        // Without one, this path hides messages and leaves nothing on screen to
+        // explain where they went.
+        title: summaryInfo?.title,
+        summary: summaryInfo?.summary,
     };
     context.saveMetadataDebounced?.();
 }
@@ -170,6 +205,16 @@ export async function flushPendingSummaryHide() {
         await hideChatMessageRange(start, maxSafeEnd, false);
         setWatermark(maxSafeEnd);
         console.log(`[TunnelVision] Hid messages ${start}-${maxSafeEnd} (${visibleCount} visible) after final response`);
+
+        // Post a marker standing in for what was just hidden. This path used to
+        // hide silently, which left orphaned hidden messages — out of the model's
+        // context, still rendered, with nothing accounting for them. It also made
+        // the collapse fallback misattribute those messages to whichever later
+        // summary happened to sit above them.
+        if (pending.title) {
+            await postSummaryMarker(pending.title, pending.summary || '', { start, end: maxSafeEnd });
+        }
+
         return `Hidden ${visibleCount} summarized messages (${start}-${maxSafeEnd}).`;
     } catch (e) {
         console.error('[TunnelVision] Failed to flush pending summarized messages:', e);
@@ -335,6 +380,9 @@ When you notice related events forming a pattern or storyline, group them into "
                     keys,
                     nodeId: targetNodeId,
                     tv_tracker: args.tv_tracker,
+                    // Same rule as the interval/slash-command path: a summary stands
+                    // in for messages that get hidden, so it must always be present.
+                    constant: true,
                 });
                 markAutoSummaryComplete();
                 let response = `Summarized: "${args.title}" (UID ${result.uid}) → "${result.nodeLabel}" in "${lorebook}". Significance: ${significance}.`;
@@ -347,7 +395,7 @@ When you notice related events forming a pattern or storyline, group them into "
                 // generation and can make the model continue from an old scene.
                 const hideRange = getSummarizedHideRange(args.messages_back);
                 if (hideRange) {
-                    setPendingSummaryHide(hideRange);
+                    setPendingSummaryHide(hideRange, { title: args.title, summary: args.summary });
                     response += ` ${hideRange.visibleCount} summarized messages will be hidden after the response.`;
                 }
 
