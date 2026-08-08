@@ -23,8 +23,9 @@ import {
     findNodeById,
     getAllEntryUids,
     getSettings,
+    removeEntryFromTree,
 } from './tree-store.js';
-import { getReadableBooks, getWritableBooks, getBookListWithDescriptions, checkToolConfirmation, resolveTargetBook, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME } from './tool-registry.js';
+import { getReadableBooks, getWritableBooks, getBookListWithDescriptions, getActiveTunnelVisionBooks, checkToolConfirmation, resolveTargetBook, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, SUMMARIZE_NAME, REORGANIZE_NAME, MERGESPLIT_NAME } from './tool-registry.js';
 import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
 import { getDefinition as getRememberDef } from './tools/remember.js';
 import { getDefinition as getUpdateDef } from './tools/update.js';
@@ -36,6 +37,18 @@ import { logSidecarWrite, logSnapshotRevert } from './activity-feed.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective, trigramSimilarity } from './agent-utils.js';
 import { isStaticEntry } from './entry-protection.js';
+import {
+    ensureChatIdentity,
+    ensureMessageIdentity,
+    getMessageFingerprint,
+    locateOriginMessage,
+    makeSnapshotKey,
+    makeTrackerKey,
+    parseLegacyCommentTracker,
+    parseSnapshotKey,
+    parseTrackerKey,
+    resolveSourceMessage,
+} from './message-identity.js';
 
 const SUMMARY_DEDUP_THRESHOLD = 0.50;
 
@@ -44,7 +57,8 @@ const SUMMARY_DEDUP_THRESHOLD = 0.50;
 /**
  * Stores lorebook entry snapshots before they are modified by the sidecar.
  * Allows reverting updates if a message is deleted or swiped.
- * Keyed by "msgId:hash".
+ * Keyed by "v2:tunnelvisionMessageId:hash". Legacy "index:hash" keys are
+ * migrated conservatively during hydration.
  * @type {Map<string, Object>}
  */
 const turnSnapshots = new Map();
@@ -56,7 +70,7 @@ const MAX_SNAPSHOTS = 20;
 
 /**
  * Persist the in-memory snapshot map into chat_metadata so revert-on-deletion
- * survives a page reload. Stored as a plain object keyed by "msgId:hash".
+ * survives a page reload. Stored as a plain object keyed by origin + hash.
  */
 function persistSnapshots() {
     try {
@@ -71,14 +85,47 @@ function persistSnapshots() {
  * Rehydrate the snapshot map from chat_metadata. Call on init and on
  * CHAT_CHANGED so reverts work after a reload or chat switch.
  */
-export function hydrateSnapshots() {
+export async function hydrateSnapshots() {
     try {
         turnSnapshots.clear();
-        const data = getContext().chatMetadata?.[SNAPSHOTS_METADATA_KEY];
+        const context = getContext();
+        const chat = context.chat || [];
+        const data = context.chatMetadata?.[SNAPSHOTS_METADATA_KEY];
+        let snapshotsChanged = false;
+        let messagesChanged = false;
+
         if (data && typeof data === 'object') {
             for (const [key, snap] of Object.entries(data)) {
-                turnSnapshots.set(key, snap);
+                const origin = parseSnapshotKey(key);
+                if (!origin || origin.version === 2) {
+                    turnSnapshots.set(key, snap);
+                    continue;
+                }
+
+                const located = locateOriginMessage(chat, origin);
+                if (located.status !== 'valid' || !located.message) {
+                    // Keep unresolved legacy records. The async validity pass
+                    // will revert a genuinely missing origin, while ambiguous
+                    // duplicate-content records are retained for safety.
+                    turnSnapshots.set(key, snap);
+                    continue;
+                }
+
+                const identity = ensureMessageIdentity(located.message);
+                if (!identity.id) {
+                    turnSnapshots.set(key, snap);
+                    continue;
+                }
+                const migratedKey = makeSnapshotKey(identity.id, getMessageFingerprint(located.message));
+                turnSnapshots.set(migratedKey, snap);
+                snapshotsChanged ||= migratedKey !== key;
+                messagesChanged ||= identity.created;
             }
+        }
+
+        if (snapshotsChanged) persistSnapshots();
+        if (messagesChanged && typeof context.saveChat === 'function') {
+            await context.saveChat();
         }
     } catch { /* no active chat */ }
 }
@@ -139,14 +186,13 @@ async function takeSnapshots(snapshotKey, ops) {
     persistSnapshots();
 }
 
-/**
- * Exported for index.js to use during cleanup.
- * Reverts any modifications made by the sidecar for a specific message.
- */
-export async function revertMessageSnapshots(msgId, msgHash) {
-    const key = `${msgId}:${msgHash}`;
+/** Revert one snapshot by its exact persisted key. */
+async function revertSnapshotKey(key) {
     const snapshots = turnSnapshots.get(key);
     if (!snapshots) return false;
+
+    const origin = parseSnapshotKey(key);
+    const msgId = origin?.messageId || 'unknown';
 
     console.log(`[TunnelVision] Reverting sidecar modifications for message ${msgId}...`);
 
@@ -231,6 +277,14 @@ export async function revertMessageSnapshots(msgId, msgHash) {
 }
 
 /**
+ * Backward-compatible explicit revert helper. Legacy callers pass the two
+ * components separately; v2 validity scanning uses revertSnapshotKey directly.
+ */
+export async function revertMessageSnapshots(msgId, msgHash) {
+    return revertSnapshotKey(`${msgId}:${msgHash}`);
+}
+
+/**
  * Scan all stored snapshots and revert any that belong to messages that are
  * no longer in the chat (or have been modified via swiping).
  * This completely decouples the undo logic from ST event arguments.
@@ -240,34 +294,146 @@ export async function revertInvalidSnapshots() {
     const chat = context.chat;
     if (!chat || !turnSnapshots.size) return;
 
-    // Build set of currently valid msgId:msgHash combinations
-    const validHashes = new Set();
-    for (const msg of chat) {
-        const hash = msg.mes ? `${msg.mes.length}_${msg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
-        if (msg.mesId !== undefined) {
-            validHashes.add(`${msg.mesId}:${hash}`);
-        } else if (hash !== '0') {
-            // Legacy chats: use content-hash-only key for fingerprint matching
-            validHashes.add(hash);
+    let snapshotsChanged = false;
+    let messagesChanged = false;
+
+    // Work from a copy because valid legacy records are re-keyed in place.
+    for (const [key, snapshot] of Array.from(turnSnapshots.entries())) {
+        const origin = parseSnapshotKey(key);
+        if (!origin) {
+            console.warn(`[TunnelVision] Keeping malformed sidecar snapshot key for safety: ${key}`);
+            continue;
+        }
+
+        const located = locateOriginMessage(chat, origin);
+        if (located.status === 'ambiguous') {
+            console.warn(`[TunnelVision] Keeping ambiguous sidecar snapshot for safety: ${key}`);
+            continue;
+        }
+        if (located.status === 'invalid' || !located.message) {
+            console.log(`[TunnelVision] Reverting sidecar snapshot for message ${origin.messageId}`);
+            await revertSnapshotKey(key);
+            continue;
+        }
+
+        const identity = ensureMessageIdentity(located.message);
+        if (!identity.id) continue;
+        messagesChanged ||= identity.created;
+
+        const migratedKey = makeSnapshotKey(identity.id, getMessageFingerprint(located.message));
+        if (migratedKey !== key) {
+            turnSnapshots.delete(key);
+            turnSnapshots.set(migratedKey, snapshot);
+            snapshotsChanged = true;
         }
     }
 
-    // Revert any snapshot whose key is no longer valid
-    for (const key of turnSnapshots.keys()) {
-        const parts = key.split(':');
-        const msgId = parts[0];
-        const valid = validHashes.has(key);
-        if (!valid) {
-            const msgHash = parts.slice(1).join(':');
-            // Also check: the snapshot's content hash might match a current message's hash
-            // (e.g., when msgId is 'untracked', compare by hash alone)
-            const hashOnly = msgHash;
-            const hashMatches = msgId === 'untracked' && validHashes.has(hashOnly);
-            if (!hashMatches) {
-                console.log(`[TunnelVision] Reverting sidecar snapshot for message ${msgId}`);
-                await revertMessageSnapshots(msgId, msgHash);
+    if (snapshotsChanged) persistSnapshots();
+    if (messagesChanged && typeof context.saveChat === 'function') {
+        await context.saveChat();
+    }
+}
+
+/**
+ * Remove sidecar-created lorebook entries whose source message was deleted or
+ * swiped. Tracker migration is deliberately conservative: an old index-based
+ * tracker is upgraded when its fingerprint identifies one current message;
+ * duplicate-content ambiguity is retained rather than guessed at or deleted.
+ */
+export async function cleanInvalidSidecarMemories() {
+    const context = getContext();
+    const chat = context.chat || [];
+    const activeBooks = getActiveTunnelVisionBooks();
+    if (activeBooks.length === 0) return;
+
+    const chatIdentity = ensureChatIdentity(context);
+    if (!chatIdentity.id) {
+        console.warn('[TunnelVision] Skipping sidecar memory cleanup: chat identity unavailable');
+        return;
+    }
+    if (chatIdentity.created) context.saveMetadataDebounced?.();
+
+    let messagesChanged = false;
+
+    for (const bookName of activeBooks) {
+        const bookData = await loadWorldInfo(bookName);
+        if (!bookData?.entries) continue;
+
+        let changed = false;
+        const entryKeys = Object.keys(bookData.entries);
+
+        for (const key of entryKeys) {
+            const entry = bookData.entries[key];
+            const keys = Array.isArray(entry.key) ? entry.key : [];
+            const trackerIndex = keys.findIndex(value => String(value).startsWith('!tv_tracker:'));
+            const trackerKey = trackerIndex >= 0 ? String(keys[trackerIndex]) : null;
+            const origin = trackerKey
+                ? parseTrackerKey(trackerKey)
+                : parseLegacyCommentTracker(entry.comment || '');
+
+            // Malformed or untracked entries are outside this cleanup system.
+            if (!origin) continue;
+
+            // Lorebooks may be shared by multiple chats. A scoped tracker from
+            // another chat is valid there and must never be judged against the
+            // messages in the currently open chat.
+            if (origin.version === 2 && origin.chatId !== chatIdentity.id) continue;
+
+            const located = locateOriginMessage(chat, origin);
+            if (located.status === 'ambiguous') {
+                console.warn(`[TunnelVision] Keeping ambiguous sidecar memory for safety: UID ${entry.uid} in "${bookName}"`);
+                continue;
+            }
+
+            // Legacy trackers carry no chat scope. A missing fingerprint may
+            // mean the source was deleted here OR that the entry came from a
+            // different chat sharing this lorebook. Preserve it unless it can
+            // be positively matched and migrated.
+            if (origin.version === 1 && located.status === 'invalid') {
+                console.warn(`[TunnelVision] Keeping unscoped legacy sidecar memory for safety: UID ${entry.uid} in "${bookName}"`);
+                continue;
+            }
+
+            if (located.status === 'invalid' || !located.message) {
+                const comment = entry.comment || '';
+                console.log(`[TunnelVision] Auto-cleaning invalid memory: "${comment.substring(0, 40)}..." (UID ${entry.uid}) in "${bookName}"`);
+
+                const tree = getTree(bookName);
+                if (tree) {
+                    removeEntryFromTree(tree.root, entry.uid);
+                    saveTree(bookName, tree);
+                }
+
+                await deleteWorldInfoEntry(bookData, entry.uid, { silent: true });
+                deleteWIOriginalDataValue(bookData, entry.uid);
+                changed = true;
+                continue;
+            }
+
+            const identity = ensureMessageIdentity(located.message);
+            if (!identity.id) continue;
+            messagesChanged ||= identity.created;
+
+            const migratedTracker = makeTrackerKey(chatIdentity.id, identity.id, getMessageFingerprint(located.message));
+            if (trackerKey !== migratedTracker) {
+                const nextKeys = [...keys];
+                if (trackerIndex >= 0) nextKeys[trackerIndex] = migratedTracker;
+                else nextKeys.push(migratedTracker);
+                entry.key = nextKeys;
+
+                const originalEntry = bookData.originalData?.entries?.find(item => Number(item.uid) === Number(entry.uid));
+                if (originalEntry) originalEntry.key = [...nextKeys];
+                changed = true;
             }
         }
+
+        if (changed) {
+            await saveWorldInfo(bookName, bookData, true);
+        }
+    }
+
+    if (messagesChanged && typeof context.saveChat === 'function') {
+        await context.saveChat();
     }
 }
 
@@ -833,19 +999,16 @@ export async function excludeStaticWriteOps(ops) {
  * Execute parsed write operations via tool action functions.
  * @param {WriteOp[]} ops
  * @param {string} [reasoning]
- * @param {string|number} [messageId]
+ * @param {{chatId:string, messageId:string, fingerprint:string}} origin
  * @returns {Promise<{succeeded: number, failed: number, results: string[]}>}
  */
-async function executeWriteOps(ops, reasoning = '', messageId = null) {
+async function executeWriteOps(ops, reasoning = '', origin) {
     const results = [];
     let succeeded = 0;
     let failed = 0;
 
-    // Generate snapshot key for this turn
-    const lastMsg = getContext().chat[getContext().chat.length - 1];
-    const msgId = messageId ?? lastMsg?.mesId ?? 'untracked';
-    const msgHash = lastMsg?.mes ? `${lastMsg.mes.length}_${lastMsg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
-    const snapshotKey = `${msgId}:${msgHash}`;
+    const snapshotKey = makeSnapshotKey(origin.messageId, origin.fingerprint);
+    const tv_tracker = makeTrackerKey(origin.chatId, origin.messageId, origin.fingerprint);
 
     // Never snapshot or invoke actions for static entries: they are protected
     // from all autonomous sidecar mutations.
@@ -890,22 +1053,7 @@ async function executeWriteOps(ops, reasoning = '', messageId = null) {
                     continue;
                 }
             }
-
             let result;
-            const context = getContext();
-            const lastMsg = context.chat[context.chat.length - 1];
-            
-            // Resolve message ID reliably
-            let msgId = messageId;
-            if (msgId === null || msgId === undefined) {
-                msgId = lastMsg?.mesId;
-            }
-            if (msgId === null || msgId === undefined) {
-                msgId = 'untracked';
-            }
-
-            const msgHash = lastMsg?.mes ? `${lastMsg.mes.length}_${lastMsg.mes.substring(0, 100).replace(/[^\w]/g, '')}` : '0';
-            const tv_tracker = `!tv_tracker:${msgId}:${msgHash}`;
 
             if (op.type === 'remember') {
                 result = await rememberAction({
@@ -1071,6 +1219,32 @@ export async function runSidecarWriter(messageId = null) {
         return;
     }
 
+    // Capture the source before any slow tree/LLM work. MESSAGE_RECEIVED gives
+    // an array index, so resolving it later could bind writes to a different
+    // message if the chat changes while the sidecar is running.
+    const context = getContext();
+    const chatIdentity = ensureChatIdentity(context);
+    if (!chatIdentity.id) {
+        console.warn('[TunnelVision] Sidecar post-gen writer: chat identity unavailable');
+        return;
+    }
+    if (chatIdentity.created) context.saveMetadataDebounced?.();
+    const sourceMessage = resolveSourceMessage(context.chat, messageId);
+    if (!sourceMessage) {
+        console.warn('[TunnelVision] Sidecar post-gen writer: source message not found');
+        return;
+    }
+    const identity = ensureMessageIdentity(sourceMessage);
+    if (!identity.id) return;
+    const origin = {
+        chatId: chatIdentity.id,
+        messageId: identity.id,
+        fingerprint: getMessageFingerprint(sourceMessage),
+    };
+    if (identity.created && typeof context.saveChat === 'function') {
+        await context.saveChat();
+    }
+
     // Build tree overview (includes entry titles for update reference)
     const treeOverview = await buildWriterTreeOverview();
     if (!treeOverview.trim()) {
@@ -1157,7 +1331,7 @@ export async function runSidecarWriter(messageId = null) {
         }
 
         // Execute writes
-        const { succeeded, failed, results } = await executeWriteOps(dedupedOps, reasoning, messageId);
+        const { succeeded, failed, results } = await executeWriteOps(dedupedOps, reasoning, origin);
 
         // Explicitly refresh UI after all modifications are complete
         const { refreshUI } = await import('./ui-controller.js');
