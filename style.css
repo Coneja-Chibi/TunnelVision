@@ -778,277 +778,6 @@
     50% { opacity: 0.7; }
 }
 
-/* ===== Responsive Adjustments ===== */
-@media (max-width: 768px) {
-    /* --- Settings panel --- */
-    .tv-header {
-        padding: 10px 14px;
-    }
-
-    .tv-header-icon {
-        font-size: 18px;
-    }
-
-    .tv-header-title {
-        font-size: 13px;
-    }
-
-    .tv-header-subtitle {
-        font-size: 10px;
-    }
-
-    .tv-card-body {
-        padding: 8px;
-    }
-
-    .tv-button-row {
-        flex-direction: column;
-    }
-
-    .tv-card-header-actions {
-        flex-wrap: wrap;
-        gap: 4px;
-    }
-
-    /* --- Activity feed --- */
-    /* Mobile: larger touch target, move above bottom nav */
-    .tv-float-trigger {
-        width: 44px;
-        height: 44px;
-        font-size: 17px;
-        bottom: 120px;
-    }
-
-    /* Mobile: full-width panel */
-    .tv-float-panel {
-        width: calc(100vw - 32px);
-        max-height: 50vh;
-        left: 16px !important;
-        right: 16px;
-    }
-
-    /* --- Tree editor popup: drop the sidebar, navigate in the main panel ---
-       Stacking the sidebar above the main panel meant tapping a node at the top,
-       scrolling past the whole tree to reach its entries, then scrolling back up
-       for the next one. The main panel is already a drill-down navigator -- the
-       breadcrumb goes up, the child cards go down -- so the sidebar is a second
-       navigator for the same tree, and hiding it gives the panel the full height
-       with one scroll region. */
-    .tv-popup-body {
-        flex-direction: column;
-    }
-
-    .tv-tree-sidebar {
-        display: none;
-    }
-
-    .tv-main-panel {
-        min-height: 200px;
-    }
-
-    /* The breadcrumb is the back button here, so it needs a real touch target. */
-    .tv-main-breadcrumb {
-        font-size: 13px;
-        gap: 6px;
-        margin-bottom: 6px;
-    }
-
-    .tv-bc-crumb {
-        padding: 4px 2px;
-    }
-
-    .tv-main-header {
-        padding: 10px 12px 8px;
-    }
-
-    .tv-main-body {
-        padding: 10px 12px;
-    }
-
-    .tv-main-title {
-        font-size: 15px;
-    }
-
-    .tv-main-title-static {
-        font-size: 15px;
-    }
-
-    /* --- Popup toolbar: wrap buttons ---
-       The toolbar wraps its two halves, but tv-popup-toolbar-right is itself a
-       flex row of five buttons and has to wrap too -- a flex item defaults to
-       min-width: auto, so without this it refuses to shrink and the delete
-       button ends up past the popup's right edge, unreachable. */
-    .tv-popup-toolbar {
-        flex-wrap: wrap;
-        gap: 8px;
-        padding: 8px 10px;
-    }
-
-    .tv-popup-toolbar-left,
-    .tv-popup-toolbar-right {
-        gap: 6px;
-        flex-wrap: wrap;
-        min-width: 0;
-    }
-
-    .tv-popup-btn {
-        padding: 6px 10px;
-        font-size: 11px;
-        min-height: 34px;
-    }
-
-    .tv-popup-search {
-        width: 100%;
-        order: 10;
-    }
-
-    /* 16px, not smaller: iOS Safari auto-zooms on focusing a sub-16px input
-       and never zooms back, leaving the rest of the popup off-screen. */
-    .tv-popup-search input {
-        font-size: 16px;
-    }
-
-    /* --- Tree nodes: bigger touch targets --- */
-    .tv-tree-row {
-        padding: 6px 8px;
-        min-height: 34px;
-        font-size: 13px;
-    }
-
-    .tv-tree-toggle {
-        width: 20px;
-        font-size: 10px;
-        padding: 4px 0;
-    }
-
-    .tv-tree-dot {
-        width: 8px;
-        height: 8px;
-    }
-
-    .tv-tree-children {
-        padding-left: 12px;
-        margin-left: 6px;
-    }
-
-    /* --- Entry rows: larger touch targets --- */
-    .tv-entry-row {
-        padding: 8px 10px;
-        min-height: 40px;
-        gap: 6px;
-    }
-
-    .tv-entry-name {
-        font-size: 12px;
-    }
-
-    .tv-entry-toggle,
-    .tv-entry-remove,
-    .tv-entry-tracker,
-    .tv-entry-move {
-        opacity: 1;
-        padding: 4px;
-    }
-
-    /* Drop targets, not just labels — rows need a real touch target. */
-    .tv-move-picker-row {
-        min-height: 40px;
-    }
-
-    .tv-entry-drag {
-        display: none;
-    }
-
-    /* --- Expanded entry detail --- */
-    .tv-expand-section {
-        gap: 8px;
-    }
-
-    .tv-expand-content {
-        font-size: 12px;
-        max-height: 200px;
-    }
-
-    .tv-expand-content-edit {
-        min-height: 100px;
-        font-size: 16px;
-    }
-
-    /* --- Node summary box --- */
-    .tv-node-summary {
-        padding: 8px 10px;
-        margin-bottom: 12px;
-    }
-
-    /* --- Child node cards: stack vertically --- */
-    .tv-child-cards {
-        gap: 6px;
-    }
-
-    /* --- Kanban mini overview --- */
-    .tv-mini-cat {
-        padding: 5px 8px;
-    }
-
-    .tv-mini-cat-name {
-        font-size: 11px;
-    }
-
-    /* --- Unassigned chips --- */
-    .tv-unassigned-chip {
-        font-size: 11px;
-        padding: 6px 10px;
-    }
-
-    /* --- Confirmation popup --- */
-    .tv-confirm-args {
-        max-height: 200px;
-    }
-    .tv-confirm-diff {
-        max-height: 240px;
-    }
-    .tv-confirm-pre {
-        max-height: 180px;
-    }
-
-    /* --- Tool prompt overrides --- */
-    .tv-tool-prompt-textarea {
-        min-height: 60px;
-        font-size: 12px;
-    }
-
-    /* --- Misc mobile fixes --- */
-    .tv-tree-view {
-        max-height: 350px;
-    }
-
-    /* Advanced settings: tighter spacing */
-    .tv-adv-section-title {
-        font-size: 11px;
-    }
-
-    .tv-radio {
-        padding: 8px;
-    }
-
-    .tv-radio-label {
-        font-size: 12px;
-    }
-
-    /* --- Popup editor: reduce min-height for small screens --- */
-    .tv-popup-editor {
-        min-height: 300px;
-    }
-
-    /* --- Settings selects/inputs: full width --- */
-    .tv-container select,
-    .tv-container input[type="text"],
-    .tv-container input[type="number"],
-    .tv-container textarea {
-        font-size: 14px;
-    }
-}
-
 /* ===== Advanced Settings ===== */
 
 .tv-adv-section {
@@ -2922,4 +2651,279 @@ details.tv-confirm-diff-wrap[open] .tv-confirm-diff-summary::before { content: '
 
 .tv-adv-search-clear.tv-visible {
     display: inline-block;
+}
+
+/* ===== Responsive Adjustments =====
+   MUST STAY LAST IN THIS FILE. A media query adds no specificity, so these
+   rules only beat their base counterparts by coming later in source order.
+   This block used to sit above them and 33 of its declarations silently lost
+   -- the sidebar never hid, inputs stayed at 13px, touch targets stayed small. */
+@media (max-width: 768px) {
+    /* --- Settings panel --- */
+    .tv-header {
+        padding: 10px 14px;
+    }
+
+    .tv-header-icon {
+        font-size: 18px;
+    }
+
+    .tv-header-title {
+        font-size: 13px;
+    }
+
+    .tv-header-subtitle {
+        font-size: 10px;
+    }
+
+    .tv-card-body {
+        padding: 8px;
+    }
+
+    .tv-button-row {
+        flex-direction: column;
+    }
+
+    .tv-card-header-actions {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    /* --- Activity feed --- */
+    /* Mobile: larger touch target, move above bottom nav */
+    .tv-float-trigger {
+        width: 44px;
+        height: 44px;
+        font-size: 17px;
+        bottom: 120px;
+    }
+
+    /* Mobile: full-width panel */
+    .tv-float-panel {
+        width: calc(100vw - 32px);
+        max-height: 50vh;
+        left: 16px !important;
+        right: 16px;
+    }
+
+    /* --- Tree editor popup: drop the sidebar, navigate in the main panel ---
+       Stacking the sidebar above the main panel meant tapping a node at the top,
+       scrolling past the whole tree to reach its entries, then scrolling back up
+       for the next one. The main panel is already a drill-down navigator -- the
+       breadcrumb goes up, the child cards go down -- so the sidebar is a second
+       navigator for the same tree, and hiding it gives the panel the full height
+       with one scroll region. */
+    .tv-popup-body {
+        flex-direction: column;
+    }
+
+    .tv-tree-sidebar {
+        display: none;
+    }
+
+    .tv-main-panel {
+        min-height: 200px;
+    }
+
+    /* The breadcrumb is the back button here, so it needs a real touch target. */
+    .tv-main-breadcrumb {
+        font-size: 13px;
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+
+    .tv-bc-crumb {
+        padding: 4px 2px;
+    }
+
+    .tv-main-header {
+        padding: 10px 12px 8px;
+    }
+
+    .tv-main-body {
+        padding: 10px 12px;
+    }
+
+    .tv-main-title {
+        font-size: 15px;
+    }
+
+    .tv-main-title-static {
+        font-size: 15px;
+    }
+
+    /* --- Popup toolbar: wrap buttons ---
+       The toolbar wraps its two halves, but tv-popup-toolbar-right is itself a
+       flex row of five buttons and has to wrap too -- a flex item defaults to
+       min-width: auto, so without this it refuses to shrink and the delete
+       button ends up past the popup's right edge, unreachable. */
+    .tv-popup-toolbar {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px 10px;
+    }
+
+    .tv-popup-toolbar-left,
+    .tv-popup-toolbar-right {
+        gap: 6px;
+        flex-wrap: wrap;
+        min-width: 0;
+    }
+
+    .tv-popup-btn {
+        padding: 6px 10px;
+        font-size: 11px;
+        min-height: 34px;
+    }
+
+    .tv-popup-search {
+        width: 100%;
+        order: 10;
+    }
+
+    /* 16px, not smaller: iOS Safari auto-zooms on focusing a sub-16px input
+       and never zooms back, leaving the rest of the popup off-screen. */
+    .tv-popup-search input {
+        font-size: 16px;
+    }
+
+    /* --- Tree nodes: bigger touch targets --- */
+    .tv-tree-row {
+        padding: 6px 8px;
+        min-height: 34px;
+        font-size: 13px;
+    }
+
+    .tv-tree-toggle {
+        width: 20px;
+        font-size: 10px;
+        padding: 4px 0;
+    }
+
+    .tv-tree-dot {
+        width: 8px;
+        height: 8px;
+    }
+
+    .tv-tree-children {
+        padding-left: 12px;
+        margin-left: 6px;
+    }
+
+    /* --- Entry rows: larger touch targets --- */
+    .tv-entry-row {
+        padding: 8px 10px;
+        min-height: 40px;
+        gap: 6px;
+    }
+
+    .tv-entry-name {
+        font-size: 12px;
+    }
+
+    .tv-entry-toggle,
+    .tv-entry-remove,
+    .tv-entry-tracker,
+    .tv-entry-move {
+        opacity: 1;
+        padding: 4px;
+    }
+
+    /* Drop targets, not just labels — rows need a real touch target. */
+    .tv-move-picker-row {
+        min-height: 40px;
+    }
+
+    .tv-entry-drag {
+        display: none;
+    }
+
+    /* --- Expanded entry detail --- */
+    .tv-expand-section {
+        gap: 8px;
+    }
+
+    .tv-expand-content {
+        font-size: 12px;
+        max-height: 200px;
+    }
+
+    .tv-expand-content-edit {
+        min-height: 100px;
+        font-size: 16px;
+    }
+
+    /* --- Node summary box --- */
+    .tv-node-summary {
+        padding: 8px 10px;
+        margin-bottom: 12px;
+    }
+
+    /* --- Child node cards: stack vertically --- */
+    .tv-child-cards {
+        gap: 6px;
+    }
+
+    /* --- Kanban mini overview --- */
+    .tv-mini-cat {
+        padding: 5px 8px;
+    }
+
+    .tv-mini-cat-name {
+        font-size: 11px;
+    }
+
+    /* --- Unassigned chips --- */
+    .tv-unassigned-chip {
+        font-size: 11px;
+        padding: 6px 10px;
+    }
+
+    /* --- Confirmation popup --- */
+    .tv-confirm-args {
+        max-height: 200px;
+    }
+    .tv-confirm-diff {
+        max-height: 240px;
+    }
+    .tv-confirm-pre {
+        max-height: 180px;
+    }
+
+    /* --- Tool prompt overrides --- */
+    .tv-tool-prompt-textarea {
+        min-height: 60px;
+        font-size: 12px;
+    }
+
+    /* --- Misc mobile fixes --- */
+    .tv-tree-view {
+        max-height: 350px;
+    }
+
+    /* Advanced settings: tighter spacing */
+    .tv-adv-section-title {
+        font-size: 11px;
+    }
+
+    .tv-radio {
+        padding: 8px;
+    }
+
+    .tv-radio-label {
+        font-size: 12px;
+    }
+
+    /* --- Popup editor: reduce min-height for small screens --- */
+    .tv-popup-editor {
+        min-height: 300px;
+    }
+
+    /* --- Settings selects/inputs: full width --- */
+    .tv-container select,
+    .tv-container input[type="text"],
+    .tv-container input[type="number"],
+    .tv-container textarea {
+        font-size: 14px;
+    }
 }
