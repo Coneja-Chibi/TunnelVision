@@ -2063,6 +2063,17 @@ async function onOpenTreeEditor() {
         $row.append($('<span class="tv-entry-name"></span>').text(label));
         $row.append($(`<span class="tv-entry-uid">#${uid}</span>`));
 
+        // Move to another category. Drag-and-drop below only fires on desktop, so
+        // on a phone this is the only way to assign an entry -- it leads the
+        // action group, with the tracker and visibility toggles between it and
+        // the remove button so a thumb cannot stray from one to the other.
+        const $move = $('<button class="tv-btn-icon tv-entry-move" title="Move to category"><i class="fa-solid fa-arrow-turn-down"></i></button>');
+        $move.on('click', (e) => {
+            e.stopPropagation();
+            openMovePicker(uid, label, isUnassigned ? null : node);
+        });
+        $row.append($move);
+
         // Tracker toggle
         if (entry) {
             const tracked = isTrackerUid(bookName, uid);
@@ -2109,14 +2120,6 @@ async function onOpenTreeEditor() {
             $row.append($toggle);
             if (isDisabled) $row.addClass('is-disabled');
         }
-
-        // Move to another category. Drag-and-drop below only fires on desktop.
-        const $move = $('<button class="tv-btn-icon tv-entry-move" title="Move to category"><i class="fa-solid fa-arrow-turn-down"></i></button>');
-        $move.on('click', (e) => {
-            e.stopPropagation();
-            openMovePicker(uid, label, isUnassigned ? null : node);
-        });
-        $row.append($move);
 
         if (!isUnassigned) {
             const $remove = $('<button class="tv-btn-icon tv-btn-danger-icon tv-entry-remove" title="Remove from node"><i class="fa-solid fa-xmark"></i></button>');

@@ -2829,6 +2829,12 @@ details.tv-confirm-diff-wrap[open] .tv-confirm-diff-summary::before { content: '
         padding: 4px;
     }
 
+    /* Push the one destructive button away from the rest of the group -- a thumb
+       is far less precise than a cursor, and these sit shoulder to shoulder. */
+    .tv-entry-remove {
+        margin-left: 10px;
+    }
+
     /* Drop targets, not just labels — rows need a real touch target. */
     .tv-move-picker-row {
         min-height: 40px;
