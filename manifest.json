@@ -4,6 +4,7 @@
     "requires": [],
     "optional": [],
     "js": "index.js",
+    "generate_interceptor": "TunnelVision_generateInterceptor",
     "css": "style.css",
     "author": "Coneja-Chibi",
     "version": "0.1.0",

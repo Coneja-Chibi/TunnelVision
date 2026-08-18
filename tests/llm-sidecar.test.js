@@ -440,6 +440,78 @@ describe('sidecarGenerate', () => {
     });
 });
 
+// ── abortSidecarFetches ──────────────────────────────────────────
+
+import { abortSidecarFetches, beginRetrievalScope, endRetrievalScope, isRetrievalScopeOpen } from '../llm-sidecar.js';
+
+describe('abortSidecarFetches', () => {
+    // A fetch that never resolves on its own — it only settles when its
+    // AbortSignal fires, mirroring a real request the user cancels mid-flight.
+    function abortableFetch() {
+        return vi.fn((url, opts) => new Promise((_, reject) => {
+            opts.signal.addEventListener('abort', () => {
+                const err = new Error('The operation was aborted');
+                err.name = 'AbortError';
+                reject(err);
+            });
+        }));
+    }
+
+    it('rejects an in-flight sidecarGenerate as cancelled, not timed out', async () => {
+        mockSidecarProfile = { ...validProfile };
+        vi.stubGlobal('fetch', abortableFetch());
+
+        beginRetrievalScope();
+        const pending = sidecarGenerate({ prompt: 'test' }); // registers synchronously
+        endRetrievalScope();
+        await Promise.resolve();
+        abortSidecarFetches();
+
+        await expect(pending).rejects.toMatchObject({ cancelled: true });
+        await expect(pending).rejects.not.toThrow(/timed out/);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('does not count a cancel toward the circuit breaker', async () => {
+        mockSidecarProfile = { ...validProfile };
+        vi.stubGlobal('fetch', abortableFetch());
+
+        for (let i = 0; i < 3; i++) {
+            beginRetrievalScope();
+            const pending = sidecarGenerate({ prompt: 'test' });
+            endRetrievalScope();
+            await Promise.resolve();
+            abortSidecarFetches();
+            try { await pending; } catch { /* cancelled */ }
+        }
+
+        expect(isSidecarConfigured()).toBe(true);
+        expect(isCircuitOpen()).toBe(false);
+
+        vi.unstubAllGlobals();
+    });
+
+    it('does not abort a fetch started outside a retrieval scope (writer protection)', async () => {
+        mockSidecarProfile = { ...validProfile };
+        let aborted = false;
+        vi.stubGlobal('fetch', vi.fn((url, opts) => new Promise((resolve) => {
+            opts.signal.addEventListener('abort', () => { aborted = true; });
+            setTimeout(() => resolve({ ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) }), 5);
+        })));
+
+        // No retrieval scope — this stands in for a sidecar writer call.
+        const pending = sidecarGenerate({ prompt: 'writer' });
+        await Promise.resolve();
+        abortSidecarFetches(); // must be a no-op for an unscoped fetch
+
+        await expect(pending).resolves.toBe('ok');
+        expect(aborted).toBe(false);
+
+        vi.unstubAllGlobals();
+    });
+});
+
 // ── getEmbeddingConfig ───────────────────────────────────────────
 
 describe('getEmbeddingConfig', () => {
@@ -739,5 +811,24 @@ describe('testEmbeddingConnectivity', () => {
         expect(result.message).toContain('Connection failed');
 
         vi.unstubAllGlobals();
+    });
+});
+
+// ── isRetrievalScopeOpen ─────────────────────────────────────────
+// Gates the "stop pressed during retrieval" flag in index.js: a stop that lands
+// while the scope is open must re-abort ST's freshly created abortController,
+// while a stop outside the scope (mid-stream, or during a sidecar writer) must not.
+describe('isRetrievalScopeOpen', () => {
+    it('is true only between begin and end, and survives nesting', () => {
+        expect(isRetrievalScopeOpen()).toBe(false);
+        beginRetrievalScope();
+        expect(isRetrievalScopeOpen()).toBe(true);
+        beginRetrievalScope();
+        endRetrievalScope();
+        expect(isRetrievalScopeOpen()).toBe(true);
+        endRetrievalScope();
+        expect(isRetrievalScopeOpen()).toBe(false);
+        endRetrievalScope(); // underflow guard
+        expect(isRetrievalScopeOpen()).toBe(false);
     });
 });

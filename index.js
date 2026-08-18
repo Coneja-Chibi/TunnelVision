@@ -38,6 +38,7 @@ import { initSmartContext } from './smart-context.js';
 import { initMemoryLifecycle } from './memory-lifecycle.js';
 import { runSidecarRetrieval, clearRetrievalPrompt } from './sidecar-retrieval.js';
 import { runSidecarWriter, revertInvalidSnapshots, hydrateSnapshots, cleanInvalidSidecarMemories } from './sidecar-writer.js';
+import { abortSidecarFetches, isRetrievalScopeOpen } from './llm-sidecar.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
 import { findEntryByUid } from './entry-manager.js';
@@ -54,7 +55,25 @@ let _generationInProgress = false;
 // so we mirror it here to know when we're on the final pass.
 let _toolRecursionDepth = 0;
 let _skipPreCommandGeneration = false;
+// Set when the user hits stop while TunnelVision holds ST's GENERATION_STARTED await.
+let _stopRequestedDuringRetrieval = false;
+
 let _stateRefreshTimer = null;
+
+// ST's supported cancel hook: registered via manifest.generate_interceptor and
+// called as globalThis[key](chat, contextSize, abort, type) from Generate()
+// (script.js: `const aborted = await runGenerationInterceptors(...)`). Calling
+// abort(true) makes Generate return before it builds any request — the only
+// point in the pipeline where an extension can stop the main model cleanly.
+// Aborting ST's abortController from GENERATION_STOPPED does not: Generate
+// replaces it right after the GENERATION_STARTED await it was blocked on.
+globalThis.TunnelVision_generateInterceptor = function (_chat, _contextSize, abort, _type) {
+    if (!_stopRequestedDuringRetrieval) return;
+    _stopRequestedDuringRetrieval = false;
+    console.log('[TunnelVision] Stop pressed during retrieval — cancelling the main model request');
+    toastr.info('Retrieval stopped — the reply was not sent.', 'TunnelVision');
+    abort(true);
+};
 
 async function init() {
     // Ensure settings exist
@@ -174,6 +193,23 @@ async function init() {
                 window.TunnelVision_isRecursiveToolPass = false;
             });
         }
+    }
+
+    // Abort any in-flight sidecar retrieval when the user stops generation.
+    // Separate from the guard-clearing block above (which only runs its
+    // GENERATION_STOPPED branch when GENERATION_ENDED is absent). This one is
+    // always registered so stop actually cancels the sidecar fetch.
+    if (event_types.GENERATION_STOPPED) {
+        eventSource.on(event_types.GENERATION_STOPPED, () => {
+            // Aborting our own fetches is not enough: ST's Generate() is parked on the
+            // GENERATION_STARTED await we are holding and will carry on to the main
+            // request once we return. Remember the stop so the generate interceptor
+            // can cancel that request — see TunnelVision_generateInterceptor.
+            const inRetrieval = isRetrievalScopeOpen();
+            if (inRetrieval) _stopRequestedDuringRetrieval = true;
+            console.debug(`[TunnelVision] GENERATION_STOPPED — aborting in-flight sidecar fetches (duringRetrieval=${inRetrieval})`);
+            abortSidecarFetches();
+        });
     }
 
     // Post-generation sidecar writer (remember/update after model responds)
@@ -937,6 +973,8 @@ async function onGenerationStarted(type, opts, dryRun) {
     // Do NOT set _generationInProgress on dry runs: they never fire MESSAGE_RECEIVED or
     // GENERATION_ENDED to clear it, so it would stay true forever and block tool re-registration.
     if (dryRun) return;
+    // Drop any stale request from a turn that never reached the generate interceptor.
+    _stopRequestedDuringRetrieval = false;
 
     if (isPendingSlashCommandGeneration(type)) {
         _skipPreCommandGeneration = true;

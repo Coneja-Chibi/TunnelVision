@@ -25,7 +25,7 @@ import {
 } from './tree-store.js';
 import { getReadableBooks } from './tool-registry.js';
 import { hasEvaluableConditions, separateConditions, mapSelectiveLogic, describeSelectiveLogic, CONDITION_DESCRIPTIONS, CONDITION_LABELS, rollKeywordProbability, formatCondition } from './conditions.js';
-import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel } from './llm-sidecar.js';
+import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel, beginRetrievalScope, endRetrievalScope } from './llm-sidecar.js';
 import { logSidecarRetrieval, logConditionalEvaluations, setSidecarActive } from './activity-feed.js';
 import { getKeywordTriggeredUids } from './index.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
@@ -497,7 +497,15 @@ export async function runSidecarRetrieval(type = null) {
         : [];
     const conditionalSection = buildConditionalSection(conditionalEntries);
 
+    // ST hides #mes_stop until after the GENERATION_STARTED await, so there is no
+    // cancel affordance during retrieval. Reveal ST's own button for the duration;
+    // clicking it runs stopGeneration() → GENERATION_STOPPED → abortSidecarFetches().
+    // ponytail: reuse ST's button, restore its prior state — no new UI, no ST import
+    const stopBtn = document.getElementById('mes_stop');
+    const revealedStopBtn = stopBtn && getComputedStyle(stopBtn).display === 'none';
+    if (revealedStopBtn) stopBtn.style.display = 'flex';
     setSidecarActive(true);
+    beginRetrievalScope();
     try {
         // Ask sidecar LLM to pick relevant nodes AND evaluate conditionals
         const prompt = buildRetrievalPrompt(treeOverview, recentChat, conditionalSection);
@@ -595,10 +603,16 @@ export async function runSidecarRetrieval(type = null) {
         console.log(`Total chars: ${capped.length} (~${Math.round(capped.length / 4)} tokens)`);
         console.groupEnd();
     } catch (error) {
-        console.error('[TunnelVision] Sidecar auto-retrieval failed:', error);
+        if (error?.cancelled) {
+            console.debug('[TunnelVision] Sidecar auto-retrieval cancelled — user stopped generation');
+        } else {
+            console.error('[TunnelVision] Sidecar auto-retrieval failed:', error);
+        }
         clearRetrievalPrompt(settings);
     } finally {
+        endRetrievalScope();
         setSidecarActive(false);
+        if (revealedStopBtn) stopBtn.style.display = 'none';
     }
 }
 
