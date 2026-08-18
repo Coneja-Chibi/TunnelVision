@@ -828,20 +828,19 @@
     }
 
     /* --- Tree editor popup: stack sidebar above main panel ---
-       Stacked, the sidebar and main panel are their own scroll regions nested
-       inside the popup's own vertical scroll. Three scrollers in a 90dvh box
-       leaves the entry list ~200px tall, so let the whole column scroll as one. */
+       The sidebar and main panel must keep their own scroll regions here.
+       .tv-popup-editor is height: 100%, so the editor can never grow past the
+       popup and .popup-content has nothing to scroll -- take the inner
+       scrollers away and the overflow becomes unreachable instead. */
     .tv-popup-body {
         flex-direction: column;
-        overflow: visible;
     }
 
     .tv-tree-sidebar {
         width: 100%;
-        max-height: none;
+        max-height: 40vh;
         border-right: none;
         border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
-        overflow: visible;
     }
 
     .tv-tree-sidebar-header {
@@ -850,12 +849,10 @@
 
     .tv-tree-sidebar-scroll {
         padding: 4px;
-        overflow: visible;
     }
 
     .tv-main-panel {
         min-height: 200px;
-        overflow: visible;
     }
 
     .tv-main-header {
@@ -864,7 +861,6 @@
 
     .tv-main-body {
         padding: 10px 12px;
-        overflow: visible;
     }
 
     .tv-main-title {
@@ -875,7 +871,11 @@
         font-size: 15px;
     }
 
-    /* --- Popup toolbar: wrap buttons --- */
+    /* --- Popup toolbar: wrap buttons ---
+       The toolbar wraps its two halves, but tv-popup-toolbar-right is itself a
+       flex row of five buttons and has to wrap too -- a flex item defaults to
+       min-width: auto, so without this it refuses to shrink and the delete
+       button ends up past the popup's right edge, unreachable. */
     .tv-popup-toolbar {
         flex-wrap: wrap;
         gap: 8px;
@@ -885,6 +885,8 @@
     .tv-popup-toolbar-left,
     .tv-popup-toolbar-right {
         gap: 6px;
+        flex-wrap: wrap;
+        min-width: 0;
     }
 
     .tv-popup-btn {
