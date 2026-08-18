@@ -69,6 +69,7 @@ import {
   invalidatePreWarmCache,
 } from "./smart-context.js";
 import { hashString, shuffleArray, isSystemEntry } from "./shared-utils.js";
+import { isOocUserTurn } from "./turn-classification.js";
 import { withWorldInfoAttribution } from "./world-info-attribution.js";
 import {
   DEDUP_SIMILARITY_THRESHOLD as DEDUP_THRESHOLD,
@@ -1578,6 +1579,7 @@ async function rollbackLastPostTurn() {
 function onAiMessageReceived(messageId, type) {
   const settings = getSettings();
   if (!settings.postTurnEnabled || settings.globalEnabled === false) return;
+  if (isOocUserTurn(getContext().chat)) return;
 
   // continue/append/first_message/command generations reuse or extend the
   // last message rather than swiping it — the length-based heuristic below
