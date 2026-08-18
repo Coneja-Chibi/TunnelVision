@@ -20,6 +20,7 @@ import {
     removeEntryFromTree,
     getAllEntryUids,
     flattenNodes,
+    findNodeById,
     getSettings,
     getBookDescription,
     setBookDescription,
@@ -2362,12 +2363,19 @@ async function onOpenTreeEditor() {
 
     // Wire toolbar buttons BEFORE showing popup (callGenericPopup awaits until close)
     $popup.find('#tv_popup_add_cat').on('click', () => {
-        tree.root.children = tree.root.children || [];
-        tree.root.children.push(createTreeNode('New Category'));
-        tree.root.collapsed = false;
+        // Add under the node being viewed, not always the root. Resolve it by id
+        // rather than trusting the reference: an external refresh replaces
+        // tree.root wholesale, which would leave selectedNode pointing at a
+        // detached node whose new child is never saved. Unassigned is a pseudo-
+        // node that is not in the tree at all, so it falls back to root too.
+        const target = (selectedNode && selectedNode.id !== '__unassigned__'
+            ? findNodeById(tree.root, selectedNode.id)
+            : null) || tree.root;
+        target.children = target.children || [];
+        target.children.push(createTreeNode(target === tree.root ? 'New Category' : 'New Sub-category'));
+        target.collapsed = false;
         saveTree(bookName, tree);
-        renderTreeNodes();
-        renderMainPanel();
+        selectNode(target);
         registerTools();
     });
 
