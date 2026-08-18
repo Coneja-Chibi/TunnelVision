@@ -19,6 +19,7 @@ import {
     removeNode,
     removeEntryFromTree,
     getAllEntryUids,
+    flattenNodes,
     getSettings,
     getBookDescription,
     setBookDescription,
@@ -43,7 +44,7 @@ import { clearRetrievalPrompt } from './sidecar-retrieval.js';
 import { applyRecurseLimit } from './index.js';
 import { refreshHiddenToolCallMessages } from './activity-feed.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
-import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
+import { callGenericPopup, Popup, POPUP_RESULT, POPUP_TYPE } from '../../../popup.js';
 
 
 let currentLorebook = null;
@@ -1739,6 +1740,42 @@ async function onOpenTreeEditor() {
         saveTree(bookName, tree);
     }
 
+    /**
+     * Pick a destination node for an entry from a flat, indented list.
+     * Touch devices get no HTML5 drag events at all, so this is the only way
+     * to assign an entry on a phone — and it beats dragging across the panel
+     * on a deep tree with a mouse too.
+     */
+    async function openMovePicker(uid, entryLabel, currentNode) {
+        const $list = $('<div class="tv-move-picker"></div>');
+        $list.append($('<div class="tv-move-picker-title"></div>').text(`Move "${entryLabel}" to…`));
+
+        const picker = new Popup($list, POPUP_TYPE.TEXT, '', { okButton: false, cancelButton: 'Cancel' });
+
+        for (const { node, depth } of flattenNodes(tree.root)) {
+            const isCurrent = node.id === currentNode?.id;
+            const $row = $(`<div class="tv-tree-row tv-move-picker-row${isCurrent ? ' is-current' : ''}"></div>`);
+            $row.css('padding-left', `${8 + depth * 14}px`);
+            $row.append($('<span class="tv-tree-dot"></span>'));
+            $row.append($('<span class="tv-tree-label"></span>').text(node === tree.root ? 'Root' : (node.label || 'Unnamed')));
+            $row.append($(`<span class="tv-tree-count">${countActiveEntries(node)}</span>`));
+            if (isCurrent) {
+                $row.append($('<span class="tv-move-picker-here">here</span>'));
+            } else {
+                $row.on('click', async () => {
+                    assignEntryToNode(uid, node);
+                    await picker.complete(POPUP_RESULT.CANCELLED);
+                    selectNode(node);
+                    await renderUnassignedEntries(bookName, tree, bookData);
+                    registerTools();
+                });
+            }
+            $list.append($row);
+        }
+
+        await picker.show();
+    }
+
     function renderTreeNodes() {
         $treeScroll.empty();
         $treeScroll.append(buildTreeNode(tree.root, 0, { isRoot: true }));
@@ -2049,6 +2086,14 @@ async function onOpenTreeEditor() {
             if (isDisabled) $row.addClass('is-disabled');
         }
 
+        // Move to another category. Drag-and-drop below only fires on desktop.
+        const $move = $('<button class="tv-btn-icon tv-entry-move" title="Move to category"><i class="fa-solid fa-arrow-turn-down"></i></button>');
+        $move.on('click', (e) => {
+            e.stopPropagation();
+            openMovePicker(uid, label, isUnassigned ? null : node);
+        });
+        $row.append($move);
+
         if (!isUnassigned) {
             const $remove = $('<button class="tv-btn-icon tv-btn-danger-icon tv-entry-remove" title="Remove from node"><i class="fa-solid fa-xmark"></i></button>');
             $remove.on('click', async (e) => {
@@ -2353,7 +2398,10 @@ async function onOpenTreeEditor() {
     try {
         await callGenericPopup($popup, POPUP_TYPE.DISPLAY, '', {
             large: true,
-            wide: true,
+            // `wide` sets min-width: var(--sheldWidth), and min-width beats the
+            // popup's own max-width — on a phone that pushes the right-hand
+            // toolbar off-screen with horizontal scrolling disabled.
+            wide: window.innerWidth > 768,
             allowVerticalScrolling: true,
             allowHorizontalScrolling: false,
         });

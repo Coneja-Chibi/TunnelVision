@@ -827,16 +827,21 @@
         right: 16px;
     }
 
-    /* --- Tree editor popup: stack sidebar above main panel --- */
+    /* --- Tree editor popup: stack sidebar above main panel ---
+       Stacked, the sidebar and main panel are their own scroll regions nested
+       inside the popup's own vertical scroll. Three scrollers in a 90dvh box
+       leaves the entry list ~200px tall, so let the whole column scroll as one. */
     .tv-popup-body {
         flex-direction: column;
+        overflow: visible;
     }
 
     .tv-tree-sidebar {
         width: 100%;
-        max-height: 40vh;
+        max-height: none;
         border-right: none;
         border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
+        overflow: visible;
     }
 
     .tv-tree-sidebar-header {
@@ -845,10 +850,12 @@
 
     .tv-tree-sidebar-scroll {
         padding: 4px;
+        overflow: visible;
     }
 
     .tv-main-panel {
         min-height: 200px;
+        overflow: visible;
     }
 
     .tv-main-header {
@@ -857,6 +864,7 @@
 
     .tv-main-body {
         padding: 10px 12px;
+        overflow: visible;
     }
 
     .tv-main-title {
@@ -890,8 +898,10 @@
         order: 10;
     }
 
+    /* 16px, not smaller: iOS Safari auto-zooms on focusing a sub-16px input
+       and never zooms back, leaving the rest of the popup off-screen. */
     .tv-popup-search input {
-        font-size: 13px;
+        font-size: 16px;
     }
 
     /* --- Tree nodes: bigger touch targets --- */
@@ -930,9 +940,15 @@
 
     .tv-entry-toggle,
     .tv-entry-remove,
-    .tv-entry-tracker {
+    .tv-entry-tracker,
+    .tv-entry-move {
         opacity: 1;
         padding: 4px;
+    }
+
+    /* Drop targets, not just labels — rows need a real touch target. */
+    .tv-move-picker-row {
+        min-height: 40px;
     }
 
     .tv-entry-drag {
@@ -951,7 +967,7 @@
 
     .tv-expand-content-edit {
         min-height: 100px;
-        font-size: 13px;
+        font-size: 16px;
     }
 
     /* --- Node summary box --- */
@@ -2122,6 +2138,46 @@
 
 .tv-entry-row:hover .tv-entry-remove {
     opacity: 1;
+}
+
+.tv-entry-move {
+    opacity: 0;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.tv-entry-row:hover .tv-entry-move {
+    opacity: 1;
+}
+
+/* ===== Move-to picker ===== */
+.tv-move-picker {
+    text-align: left;
+    max-height: 60vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+.tv-move-picker-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--SmartThemeQuoteColor, #888);
+    padding: 0 8px 8px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
+    margin-bottom: 6px;
+}
+
+.tv-move-picker-row.is-current {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.tv-move-picker-here {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--SmartThemeQuoteColor, #888);
+    margin-left: 6px;
 }
 
 /* Inline expand */
