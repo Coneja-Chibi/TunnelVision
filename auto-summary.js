@@ -9,6 +9,7 @@ import { eventSource, event_types, setExtensionPrompt, extension_prompt_types } 
 import { getContext } from '../../../st-context.js';
 import { getSettings } from './tree-store.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
+import { isOocTurn, isOocUserTurn } from './turn-classification.js';
 import { runSummary } from './summary-runner.js';
 
 const TV_AUTOSUMMARY_KEY = 'tunnelvision_autosummary';
@@ -58,6 +59,7 @@ function getChatId() {
 function onMessageReceived() {
     const settings = getSettings();
     if (!settings.autoSummaryEnabled || settings.globalEnabled === false) return;
+    if (isOocUserTurn(getContext().chat)) return;
 
     const chatId = getChatId();
     if (!chatId) return;
@@ -93,6 +95,15 @@ async function onMessageReceivedAndMaybeRun() {
 
 async function maybeRunAutoSummary() {
     const settings = getSettings();
+    let pendingUserInput = '';
+    try {
+        pendingUserInput = String($('#send_textarea').val() || '');
+    } catch { /* no textarea in tests/non-UI contexts */ }
+
+    // An OOC turn must not trigger a summary: the summary now runs for real
+    // (runSummary) rather than being injected as an instruction, so firing it
+    // on an out-of-character aside would write that aside into the lorebook.
+    if (isOocTurn(getContext().chat, pendingUserInput)) return;
     if (!settings.autoSummaryEnabled || settings.globalEnabled === false) return;
     if (_summaryInFlight) return;
 

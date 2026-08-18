@@ -23,6 +23,7 @@ import { getChatId, formatChatExcerpt, callWithRetry } from './agent-utils.js';
 import { addBackgroundEvent, registerBackgroundTask } from './background-events.js';
 import { buildArcsSummary } from './arc-tracker.js';
 import { withWorldInfoAttribution } from './world-info-attribution.js';
+import { isOocUserTurn } from './turn-classification.js';
 
 const METADATA_KEY = 'tunnelvision_worldstate';
 
@@ -603,6 +604,7 @@ export function requestPriorityUpdate(reason) {
 function onAiMessageReceived() {
     const settings = getSettings();
     if (!settings.worldStateEnabled || settings.globalEnabled === false) return;
+    if (isOocUserTurn(getContext().chat)) return;
 
     // Skip tool-call recursion
     try {
