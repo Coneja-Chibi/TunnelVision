@@ -827,32 +827,34 @@
         right: 16px;
     }
 
-    /* --- Tree editor popup: stack sidebar above main panel ---
-       The sidebar and main panel must keep their own scroll regions here.
-       .tv-popup-editor is height: 100%, so the editor can never grow past the
-       popup and .popup-content has nothing to scroll -- take the inner
-       scrollers away and the overflow becomes unreachable instead. */
+    /* --- Tree editor popup: drop the sidebar, navigate in the main panel ---
+       Stacking the sidebar above the main panel meant tapping a node at the top,
+       scrolling past the whole tree to reach its entries, then scrolling back up
+       for the next one. The main panel is already a drill-down navigator -- the
+       breadcrumb goes up, the child cards go down -- so the sidebar is a second
+       navigator for the same tree, and hiding it gives the panel the full height
+       with one scroll region. */
     .tv-popup-body {
         flex-direction: column;
     }
 
     .tv-tree-sidebar {
-        width: 100%;
-        max-height: 40vh;
-        border-right: none;
-        border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
-    }
-
-    .tv-tree-sidebar-header {
-        padding: 6px 10px;
-    }
-
-    .tv-tree-sidebar-scroll {
-        padding: 4px;
+        display: none;
     }
 
     .tv-main-panel {
         min-height: 200px;
+    }
+
+    /* The breadcrumb is the back button here, so it needs a real touch target. */
+    .tv-main-breadcrumb {
+        font-size: 13px;
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+
+    .tv-bc-crumb {
+        padding: 4px 2px;
     }
 
     .tv-main-header {
@@ -981,11 +983,6 @@
     /* --- Child node cards: stack vertically --- */
     .tv-child-cards {
         gap: 6px;
-    }
-
-    /* --- Breadcrumbs --- */
-    .tv-main-breadcrumb {
-        font-size: 10px;
     }
 
     /* --- Kanban mini overview --- */
@@ -2642,6 +2639,17 @@
 .tv-child-card:hover {
     border-color: rgba(108, 92, 231, 0.3);
     background: rgba(108, 92, 231, 0.07);
+}
+
+/* Unassigned is not a real category -- keep it neutral so it reads as a
+   holding pen rather than a sibling of the tree's own nodes. */
+.tv-child-card-unassigned {
+    background: var(--black30a, rgba(0, 0, 0, 0.15));
+    border-color: var(--SmartThemeBorderColor, #444);
+}
+
+.tv-child-card-unassigned .tv-child-card-name {
+    color: var(--SmartThemeQuoteColor, #888);
 }
 
 .tv-child-card-info {

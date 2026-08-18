@@ -2028,6 +2028,29 @@ async function onOpenTreeEditor() {
             $body.append($cards);
         }
 
+        // Unassigned is a sidebar-only pseudo-node, and the sidebar is hidden on
+        // mobile -- surface it as a card on the root so it stays reachable.
+        if (isRoot) {
+            const unassigned = getUnassignedEntries(bookData, tree);
+            if (unassigned.length > 0) {
+                const $card = $('<div class="tv-child-card tv-child-card-unassigned"></div>');
+                $card.append($('<span class="tv-tree-dot" style="opacity:0.4"></span>'));
+                const $info = $('<div class="tv-child-card-info"></div>');
+                $info.append($('<div class="tv-child-card-name"></div>').text('Unassigned'));
+                $info.append($('<div class="tv-child-card-summary"></div>').text('Entries that are not in any category yet.'));
+                $card.append($info);
+                $card.append($(`<span class="tv-child-card-count">${unassigned.length}</span>`));
+                $card.append($('<span class="tv-child-card-arrow">▸</span>'));
+                $card.on('click', () => selectNode({
+                    id: '__unassigned__',
+                    label: 'Unassigned',
+                    entryUids: unassigned.map(e => e.uid),
+                    children: [],
+                }));
+                $body.append($('<div class="tv-child-cards"></div>').append($card));
+            }
+        }
+
         $mainPanel.append($body);
     }
 
