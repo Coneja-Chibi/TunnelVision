@@ -62,6 +62,7 @@ import {
     cleanInvalidSidecarMemories,
     excludeStaticWriteOps,
     executeWriteOps,
+    runSidecarWriterDraining,
     hydrateSnapshots,
     revertInvalidSnapshots,
     revertMessageSnapshots,
@@ -374,5 +375,60 @@ describe('write ops guard against a mid-run swipe', () => {
         await executeWriteOps(OPS, '', originFor(message)).catch(() => {});
 
         expect(loadWorldInfo).toHaveBeenCalled();
+    });
+});
+
+describe('writer drain for a swipe that lands mid-run', () => {
+    it('re-runs for the message that arrived while the writer was busy', async () => {
+        const seen = [];
+        const run = vi.fn(async (id) => {
+            seen.push(id);
+            // The swipe's MESSAGE_RECEIVED, fired while this run is still going.
+            if (seen.length === 1) await runSidecarWriterDraining(7, run);
+        });
+
+        await runSidecarWriterDraining(3, run);
+
+        expect(seen).toEqual([3, 7]);
+    });
+
+    it('coalesces repeated swipes to the last one, which is the survivor', async () => {
+        const seen = [];
+        const run = vi.fn(async (id) => {
+            seen.push(id);
+            if (seen.length === 1) {
+                await runSidecarWriterDraining(7, run);
+                await runSidecarWriterDraining(8, run);
+                await runSidecarWriterDraining(9, run);
+            }
+        });
+
+        await runSidecarWriterDraining(3, run);
+
+        expect(seen).toEqual([3, 9]);
+    });
+
+    it('still drains a queued swipe when the previous run throws', async () => {
+        const seen = [];
+        const run = vi.fn(async (id) => {
+            seen.push(id);
+            if (seen.length === 1) {
+                await runSidecarWriterDraining(7, run);
+                throw new Error('sidecar exploded');
+            }
+        });
+
+        await expect(runSidecarWriterDraining(3, run)).resolves.toBeUndefined();
+
+        expect(seen).toEqual([3, 7]);
+    });
+
+    it('releases the guard so a later turn is not locked out', async () => {
+        const run = vi.fn(async () => {});
+
+        await runSidecarWriterDraining(1, run);
+        await runSidecarWriterDraining(2, run);
+
+        expect(run).toHaveBeenCalledTimes(2);
     });
 });

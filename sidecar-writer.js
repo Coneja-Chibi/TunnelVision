@@ -1391,3 +1391,50 @@ export async function runSidecarWriter(messageId = null) {
         console.error('[TunnelVision] Sidecar post-gen writer failed:', error);
     }
 }
+
+// Re-entrancy guard for runSidecarWriter, plus the single message slot for a
+// response that arrived while it was busy.
+let _writerRunning = false;
+let _writerPendingMessageId = null;
+
+/**
+ * Run the sidecar writer, then run it again for any message that landed while it
+ * was busy.
+ *
+ * Without the drain, a swipe arriving mid-run is dropped by the re-entrancy
+ * guard while the in-flight run has its own writes discarded by the origin check
+ * in executeWriteOps — correct individually, but together they leave that turn
+ * with no memory at all.
+ *
+ * One pending slot is enough. Swiping repeatedly replaces the same message, so
+ * only the most recent one is still in the chat; earlier entries would fail the
+ * origin check anyway. The loop ends when nothing new has arrived.
+ *
+ * @param {number|string|null} messageId
+ * @param {(messageId: number|string|null) => Promise<void>} [run] seam for tests
+ * @returns {Promise<void>}
+ */
+export async function runSidecarWriterDraining(messageId, run = runSidecarWriter) {
+    if (_writerRunning) {
+        _writerPendingMessageId = messageId;
+        return;
+    }
+
+    _writerRunning = true;
+    try {
+        let nextMessageId = messageId;
+        while (nextMessageId !== null && nextMessageId !== undefined) {
+            _writerPendingMessageId = null;
+            try {
+                await run(nextMessageId);
+            } catch (error) {
+                // A failed run must not strand a queued swipe.
+                console.error('[TunnelVision] Sidecar post-gen writer error:', error);
+            }
+            nextMessageId = _writerPendingMessageId;
+        }
+    } finally {
+        _writerRunning = false;
+        _writerPendingMessageId = null;
+    }
+}
