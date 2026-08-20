@@ -38,6 +38,7 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective, trigramSimilarity } from './agent-utils.js';
 import { isStaticEntry } from './entry-protection.js';
 import {
+    CURRENT_ORIGIN_VERSION,
     ensureChatIdentity,
     ensureMessageIdentity,
     getMessageFingerprint,
@@ -1002,10 +1003,21 @@ export async function excludeStaticWriteOps(ops) {
  * @param {{chatId:string, messageId:string, fingerprint:string}} origin
  * @returns {Promise<{succeeded: number, failed: number, results: string[]}>}
  */
-async function executeWriteOps(ops, reasoning = '', origin) {
+export async function executeWriteOps(ops, reasoning = '', origin) {
     const results = [];
     let succeeded = 0;
     let failed = 0;
+
+    // `origin` was captured before the sidecar call, which takes seconds. A swipe
+    // or deletion in that window replaces the source message — and the revert pass
+    // that ran on that swipe has already been and gone. Committing now would attach
+    // this turn's memories to a response that no longer exists, leaving entries no
+    // later revert is keyed to find.
+    const located = locateOriginMessage(getContext().chat, { ...origin, version: CURRENT_ORIGIN_VERSION });
+    if (located.status === 'invalid') {
+        console.log('[TunnelVision] Sidecar writer: source message changed mid-run — discarding writes');
+        return { succeeded, failed, skipped: ops.length, results };
+    }
 
     const snapshotKey = makeSnapshotKey(origin.messageId, origin.fingerprint);
     const tv_tracker = makeTrackerKey(origin.chatId, origin.messageId, origin.fingerprint);
