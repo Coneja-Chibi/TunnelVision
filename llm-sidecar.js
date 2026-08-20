@@ -29,6 +29,29 @@ let _failureCount = 0;
 let _breakerOpen = false;
 let _breakerOpenedAt = 0;
 
+// ─── In-flight fetch tracking ────────────────────────────────────────
+// Only fetches started inside a retrieval scope are abortable. This keeps
+// ST's stop button from cancelling an in-flight sidecar *writer* (a memory
+// write), which would silently drop it. _fetchJson registers its controller
+// while the scope is open; abortSidecarFetches() aborts those on GENERATION_STOPPED.
+// ponytail: a depth counter, not a bool — safe if a scope ever nests
+const _activeFetches = new Set();
+let _retrievalScopeDepth = 0;
+
+/** Mark the start of retrieval network work; fetches started now are abortable. */
+export function beginRetrievalScope() { _retrievalScopeDepth++; }
+
+/** Mark the end of retrieval network work. Floors at 0 so it can't underflow. */
+export function endRetrievalScope() { _retrievalScopeDepth = Math.max(0, _retrievalScopeDepth - 1); }
+
+/** True while retrieval network work is in flight (ST is blocked on our handler). */
+export function isRetrievalScopeOpen() { return _retrievalScopeDepth > 0; }
+
+/** Abort every in-flight retrieval fetch. Called when the user stops generation. */
+export function abortSidecarFetches() {
+    for (const controller of _activeFetches) controller.abort();
+}
+
 export function resetCircuitBreaker() {
     _failureCount = 0;
     _breakerOpen = false;
@@ -129,18 +152,27 @@ export function isEmbeddingSupported() {
 
 async function _fetchJson(url, options, label) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SIDECAR_DEFAULT_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, SIDECAR_DEFAULT_TIMEOUT_MS);
+    const tracked = _retrievalScopeDepth > 0;
+    if (tracked) _activeFetches.add(controller);
     let response;
     try {
         response = await fetch(url, { ...options, signal: controller.signal });
     } catch (error) {
-        // A bare AbortError reads as "signal is aborted without reason" — name the timeout.
         if (error?.name === 'AbortError') {
-            throw new Error(`${label} timed out after ${SIDECAR_DEFAULT_TIMEOUT_MS / 1000}s — the sidecar endpoint did not respond in time.`);
+            if (timedOut) {
+                // A bare AbortError reads as "signal is aborted without reason" — name the timeout.
+                throw new Error(`${label} timed out after ${SIDECAR_DEFAULT_TIMEOUT_MS / 1000}s — the sidecar endpoint did not respond in time.`);
+            }
+            // External abort (user pressed stop) — tag it so callers stay quiet
+            // and the circuit breaker doesn't count it as a failure.
+            throw Object.assign(new Error(`${label} cancelled`), { name: 'TVAbortError', cancelled: true });
         }
         throw error;
     } finally {
         clearTimeout(timer);
+        if (tracked) _activeFetches.delete(controller);
     }
     if (!response.ok) {
         let detail = '';
@@ -192,7 +224,8 @@ export async function sidecarGenerate({ prompt, systemPrompt }) {
         _recordSuccess();
         return typeof result === 'string' ? result.replace(THINK_BLOCK_RE, '').trim() : result;
     } catch (error) {
-        _recordFailure();
+        // A user-cancel is not an endpoint failure — don't push the breaker toward opening.
+        if (!error?.cancelled) _recordFailure();
         throw error;
     }
 }
