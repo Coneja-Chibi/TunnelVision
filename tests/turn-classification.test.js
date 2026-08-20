@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isOocMessage, isOocTurn, isOocUserTurn, suppressTunnelVisionWriteTools } from '../turn-classification.js';
+import { isOocMessage, isOocTurn, isOocUserTurn, shouldRunSidecarWriter, suppressTunnelVisionWriteTools } from '../turn-classification.js';
 
 describe('OOC turn classification', () => {
     it.each([
@@ -131,5 +131,29 @@ describe('OOC request tool suppression', () => {
         expect(suppressTunnelVisionWriteTools(request)).toBe(1);
         expect(request.tools).toBeUndefined();
         expect(request.tool_choice).toBe('none');
+    });
+});
+
+describe('sidecar writer generation types', () => {
+    // Regression: 'swipe' used to sit in the skip list, so a swipe reverted the
+    // previous response's memories and then wrote none for the new one.
+    it('runs on a swipe', () => {
+        expect(shouldRunSidecarWriter('swipe')).toBe(true);
+    });
+
+    it('runs on a normal completion and on an unlabelled type', () => {
+        expect(shouldRunSidecarWriter('normal')).toBe(true);
+        expect(shouldRunSidecarWriter(undefined)).toBe(true);
+    });
+
+    it.each([
+        'continue',
+        'appendFinal',
+        'first_message',
+        'command',
+        'extension',
+        'regenerate',
+    ])('does not run on %j', (type) => {
+        expect(shouldRunSidecarWriter(type)).toBe(false);
     });
 });

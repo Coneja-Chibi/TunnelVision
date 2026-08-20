@@ -11,6 +11,13 @@
 export const MESSAGE_ID_FIELD = 'tunnelvision_message_id';
 export const CHAT_ID_METADATA_KEY = 'tunnelvision_chat_identity';
 const ORIGIN_VERSION = 'v2';
+/**
+ * Numeric marker parseOriginPayload() stamps on a parsed v2 origin. Origins
+ * built by hand (rather than parsed from a key) must carry it too, or the
+ * fingerprint comparison in locateOriginMessage() silently falls back to the
+ * legacy scheme and never matches.
+ */
+export const CURRENT_ORIGIN_VERSION = 2;
 const SNAPSHOT_PREFIX = `${ORIGIN_VERSION}:`;
 const TRACKER_PREFIX = '!tv_tracker:';
 const STABLE_ID_PREFIX = 'tvmsg_';

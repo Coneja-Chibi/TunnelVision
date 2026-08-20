@@ -38,6 +38,7 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective, trigramSimilarity } from './agent-utils.js';
 import { isStaticEntry } from './entry-protection.js';
 import {
+    CURRENT_ORIGIN_VERSION,
     ensureChatIdentity,
     ensureMessageIdentity,
     getMessageFingerprint,
@@ -1002,10 +1003,21 @@ export async function excludeStaticWriteOps(ops) {
  * @param {{chatId:string, messageId:string, fingerprint:string}} origin
  * @returns {Promise<{succeeded: number, failed: number, results: string[]}>}
  */
-async function executeWriteOps(ops, reasoning = '', origin) {
+export async function executeWriteOps(ops, reasoning = '', origin) {
     const results = [];
     let succeeded = 0;
     let failed = 0;
+
+    // `origin` was captured before the sidecar call, which takes seconds. A swipe
+    // or deletion in that window replaces the source message — and the revert pass
+    // that ran on that swipe has already been and gone. Committing now would attach
+    // this turn's memories to a response that no longer exists, leaving entries no
+    // later revert is keyed to find.
+    const located = locateOriginMessage(getContext().chat, { ...origin, version: CURRENT_ORIGIN_VERSION });
+    if (located.status === 'invalid') {
+        console.log('[TunnelVision] Sidecar writer: source message changed mid-run — discarding writes');
+        return { succeeded, failed, skipped: ops.length, results };
+    }
 
     const snapshotKey = makeSnapshotKey(origin.messageId, origin.fingerprint);
     const tv_tracker = makeTrackerKey(origin.chatId, origin.messageId, origin.fingerprint);
@@ -1377,5 +1389,52 @@ export async function runSidecarWriter(messageId = null) {
         console.groupEnd();
     } catch (error) {
         console.error('[TunnelVision] Sidecar post-gen writer failed:', error);
+    }
+}
+
+// Re-entrancy guard for runSidecarWriter, plus the single message slot for a
+// response that arrived while it was busy.
+let _writerRunning = false;
+let _writerPendingMessageId = null;
+
+/**
+ * Run the sidecar writer, then run it again for any message that landed while it
+ * was busy.
+ *
+ * Without the drain, a swipe arriving mid-run is dropped by the re-entrancy
+ * guard while the in-flight run has its own writes discarded by the origin check
+ * in executeWriteOps — correct individually, but together they leave that turn
+ * with no memory at all.
+ *
+ * One pending slot is enough. Swiping repeatedly replaces the same message, so
+ * only the most recent one is still in the chat; earlier entries would fail the
+ * origin check anyway. The loop ends when nothing new has arrived.
+ *
+ * @param {number|string|null} messageId
+ * @param {(messageId: number|string|null) => Promise<void>} [run] seam for tests
+ * @returns {Promise<void>}
+ */
+export async function runSidecarWriterDraining(messageId, run = runSidecarWriter) {
+    if (_writerRunning) {
+        _writerPendingMessageId = messageId;
+        return;
+    }
+
+    _writerRunning = true;
+    try {
+        let nextMessageId = messageId;
+        while (nextMessageId !== null && nextMessageId !== undefined) {
+            _writerPendingMessageId = null;
+            try {
+                await run(nextMessageId);
+            } catch (error) {
+                // A failed run must not strand a queued swipe.
+                console.error('[TunnelVision] Sidecar post-gen writer error:', error);
+            }
+            nextMessageId = _writerPendingMessageId;
+        }
+    } finally {
+        _writerRunning = false;
+        _writerPendingMessageId = null;
     }
 }

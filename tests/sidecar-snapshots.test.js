@@ -57,9 +57,12 @@ vi.mock('../agent-utils.js', () => ({
 import { getContext } from '../../../st-context.js';
 import { deleteWorldInfoEntry, loadWorldInfo, saveWorldInfo } from '../../../world-info.js';
 import { logSnapshotRevert } from '../activity-feed.js';
+import { resolveTargetBook } from '../tool-registry.js';
 import {
     cleanInvalidSidecarMemories,
     excludeStaticWriteOps,
+    executeWriteOps,
+    runSidecarWriterDraining,
     hydrateSnapshots,
     revertInvalidSnapshots,
     revertMessageSnapshots,
@@ -324,5 +327,108 @@ describe('sidecar static-entry protection', () => {
         ]);
         expect(skipped).toHaveLength(5);
         expect(skipped.every(message => message.includes('static entry "Canon"'))).toBe(true);
+    });
+});
+
+describe('write ops guard against a mid-run swipe', () => {
+    // The sidecar call between capturing `origin` and committing takes seconds.
+    // A swipe in that window replaces the message text and runs its revert pass
+    // before the writer returns, so committing afterwards would strand entries
+    // keyed to a fingerprint nothing can revert.
+    function originFor(message) {
+        return {
+            chatId: 'tvchat_1',
+            messageId: message[MESSAGE_ID_FIELD],
+            fingerprint: getMessageFingerprint(message),
+        };
+    }
+
+    const OPS = [{ type: 'remember', lorebook: 'Book', title: 'T', content: 'C', keys: ['k'] }];
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('discards the writes when the source message changed mid-run', async () => {
+        const message = { [MESSAGE_ID_FIELD]: 'tvmsg_swiped', mes: 'original response' };
+        const origin = originFor(message);
+
+        // The swipe: same message object and identity, new text.
+        message.mes = 'the swiped-to response';
+        getContext.mockReturnValue(makeContext({}, [message]));
+
+        const result = await executeWriteOps(OPS, '', origin);
+
+        expect(result.succeeded).toBe(0);
+        expect(result.skipped).toBe(OPS.length);
+        expect(loadWorldInfo).not.toHaveBeenCalled();
+        expect(saveWorldInfo).not.toHaveBeenCalled();
+    });
+
+    it('proceeds past the guard when the source message is unchanged', async () => {
+        const message = { [MESSAGE_ID_FIELD]: 'tvmsg_intact', mes: 'original response' };
+        getContext.mockReturnValue(makeContext({}, [message]));
+        resolveTargetBook.mockReturnValue({ book: 'Book' });
+
+        // Downstream tool definitions are stubbed in this file, so the call throws
+        // once it gets past snapshotting. Reaching loadWorldInfo is the assertion.
+        await executeWriteOps(OPS, '', originFor(message)).catch(() => {});
+
+        expect(loadWorldInfo).toHaveBeenCalled();
+    });
+});
+
+describe('writer drain for a swipe that lands mid-run', () => {
+    it('re-runs for the message that arrived while the writer was busy', async () => {
+        const seen = [];
+        const run = vi.fn(async (id) => {
+            seen.push(id);
+            // The swipe's MESSAGE_RECEIVED, fired while this run is still going.
+            if (seen.length === 1) await runSidecarWriterDraining(7, run);
+        });
+
+        await runSidecarWriterDraining(3, run);
+
+        expect(seen).toEqual([3, 7]);
+    });
+
+    it('coalesces repeated swipes to the last one, which is the survivor', async () => {
+        const seen = [];
+        const run = vi.fn(async (id) => {
+            seen.push(id);
+            if (seen.length === 1) {
+                await runSidecarWriterDraining(7, run);
+                await runSidecarWriterDraining(8, run);
+                await runSidecarWriterDraining(9, run);
+            }
+        });
+
+        await runSidecarWriterDraining(3, run);
+
+        expect(seen).toEqual([3, 9]);
+    });
+
+    it('still drains a queued swipe when the previous run throws', async () => {
+        const seen = [];
+        const run = vi.fn(async (id) => {
+            seen.push(id);
+            if (seen.length === 1) {
+                await runSidecarWriterDraining(7, run);
+                throw new Error('sidecar exploded');
+            }
+        });
+
+        await expect(runSidecarWriterDraining(3, run)).resolves.toBeUndefined();
+
+        expect(seen).toEqual([3, 7]);
+    });
+
+    it('releases the guard so a later turn is not locked out', async () => {
+        const run = vi.fn(async () => {});
+
+        await runSidecarWriterDraining(1, run);
+        await runSidecarWriterDraining(2, run);
+
+        expect(run).toHaveBeenCalledTimes(2);
     });
 });

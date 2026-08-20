@@ -37,12 +37,12 @@ import { initWorldState } from './world-state.js';
 import { initSmartContext } from './smart-context.js';
 import { initMemoryLifecycle } from './memory-lifecycle.js';
 import { runSidecarRetrieval, clearRetrievalPrompt } from './sidecar-retrieval.js';
-import { runSidecarWriter, revertInvalidSnapshots, hydrateSnapshots, cleanInvalidSidecarMemories } from './sidecar-writer.js';
+import { runSidecarWriterDraining, revertInvalidSnapshots, hydrateSnapshots, cleanInvalidSidecarMemories } from './sidecar-writer.js';
 import { abortSidecarFetches, isRetrievalScopeOpen } from './llm-sidecar.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
 import { findEntryByUid } from './entry-manager.js';
-import { isOocTurn, isOocUserTurn, suppressTunnelVisionWriteTools } from './turn-classification.js';
+import { isOocTurn, isOocUserTurn, shouldRunSidecarWriter, suppressTunnelVisionWriteTools } from './turn-classification.js';
 
 const EXTENSION_NAME = 'tunnelvision';
 const EXTENSION_FOLDER = `third-party/TunnelVision`;
@@ -1159,10 +1159,6 @@ async function onGenerationStarted(type, opts, dryRun) {
 // Debounce timer for sidecar writer in group chats — prevents firing
 // once per group member by waiting for the last MESSAGE_RECEIVED.
 let _sidecarWriterDebounceTimer = null;
-// Re-entrancy guard: prevents overlapping runSidecarWriter() invocations when
-// MESSAGE_RECEIVED fires again (e.g. a fast follow-up message) while a
-// previous writer run is still in flight.
-let _writerRunning = false;
 
 async function onMessageReceived(messageId, type) {
     console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${messageId} type="${type}"`);
@@ -1185,15 +1181,14 @@ async function onMessageReceived(messageId, type) {
         return;
     }
 
-    // Never run sidecar writer on swipes, continues, first messages, regenerations,
-    // or non-generation events. Only run on normal 'normal' generation completions.
-    const skipTypes = ['swipe', 'continue', 'appendFinal', 'first_message', 'command', 'extension', 'regenerate'];
-    if (skipTypes.includes(type)) return;
+    // Continues, first messages, regenerations and non-generation events must not
+    // run the writer. Swipes must: the swipe branch on MESSAGE_RECEIVED has already
+    // reverted the previous response's writes, so returning here would leave the
+    // turn with no memory at all.
+    if (!shouldRunSidecarWriter(type)) return;
 
     const settings = getSettings();
     if (!settings.sidecarPostGenWriter || settings.globalEnabled === false) return;
-
-    if (_writerRunning) return;
 
     // In group chats, debounce: wait 800ms after the last MESSAGE_RECEIVED
     // before firing the sidecar writer, so we only run once after the
@@ -1201,29 +1196,17 @@ async function onMessageReceived(messageId, type) {
     const context = getContext();
     if (context.groupId) {
         if (_sidecarWriterDebounceTimer) clearTimeout(_sidecarWriterDebounceTimer);
-        _sidecarWriterDebounceTimer = setTimeout(async () => {
+        _sidecarWriterDebounceTimer = setTimeout(() => {
             _sidecarWriterDebounceTimer = null;
-            if (_writerRunning) return;
-            _writerRunning = true;
-            try {
-                await runSidecarWriter(messageId);
-            } catch (err) {
-                console.error('[TunnelVision] Sidecar post-gen writer error (group):', err);
-            } finally {
-                _writerRunning = false;
-            }
+            runSidecarWriterDraining(messageId);
         }, 800);
         return;
     }
 
-    _writerRunning = true;
-    try {
-        await runSidecarWriter(messageId);
-    } catch (err) {
-        console.error('[TunnelVision] Sidecar post-gen writer error:', err);
-    } finally {
-        _writerRunning = false;
-    }
+    // Concurrency lives in runSidecarWriterDraining: it owns the re-entrancy
+    // guard and re-runs for a response that arrived mid-run, so a swipe landing
+    // while the writer is busy still gets memorized.
+    await runSidecarWriterDraining(messageId);
 }
 
 /**
