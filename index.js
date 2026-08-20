@@ -42,7 +42,7 @@ import { abortSidecarFetches, isRetrievalScopeOpen } from './llm-sidecar.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
 import { findEntryByUid } from './entry-manager.js';
-import { isOocTurn, isOocUserTurn, suppressTunnelVisionWriteTools } from './turn-classification.js';
+import { isOocTurn, isOocUserTurn, shouldRunSidecarWriter, suppressTunnelVisionWriteTools } from './turn-classification.js';
 
 const EXTENSION_NAME = 'tunnelvision';
 const EXTENSION_FOLDER = `third-party/TunnelVision`;
@@ -1185,10 +1185,11 @@ async function onMessageReceived(messageId, type) {
         return;
     }
 
-    // Never run sidecar writer on swipes, continues, first messages, regenerations,
-    // or non-generation events. Only run on normal 'normal' generation completions.
-    const skipTypes = ['swipe', 'continue', 'appendFinal', 'first_message', 'command', 'extension', 'regenerate'];
-    if (skipTypes.includes(type)) return;
+    // Continues, first messages, regenerations and non-generation events must not
+    // run the writer. Swipes must: the swipe branch on MESSAGE_RECEIVED has already
+    // reverted the previous response's writes, so returning here would leave the
+    // turn with no memory at all.
+    if (!shouldRunSidecarWriter(type)) return;
 
     const settings = getSettings();
     if (!settings.sidecarPostGenWriter || settings.globalEnabled === false) return;

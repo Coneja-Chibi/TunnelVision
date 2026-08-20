@@ -87,3 +87,33 @@ export function suppressTunnelVisionWriteTools(data) {
 
     return removed;
 }
+
+/**
+ * Generation types that must never trigger the post-generation sidecar writer.
+ *
+ * `swipe` is deliberately NOT here. MESSAGE_RECEIVED reverts the previous
+ * response's lorebook writes on a swipe (revertInvalidSnapshots), so skipping
+ * the writer too left that turn with no memory at all — swiping to a response
+ * you like is exactly when you want the *new* response memorized.
+ *
+ * `regenerate` stays skipped: unlike swipe it gets no revert pass, so running
+ * the writer there would stack new memories on top of the old response's.
+ */
+const NON_WRITER_GENERATION_TYPES = new Set([
+    'continue',
+    'appendFinal',
+    'first_message',
+    'command',
+    'extension',
+    'regenerate',
+]);
+
+/**
+ * Whether a MESSAGE_RECEIVED generation type should run the sidecar writer.
+ *
+ * @param {*} type
+ * @returns {boolean}
+ */
+export function shouldRunSidecarWriter(type) {
+    return !NON_WRITER_GENERATION_TYPES.has(String(type ?? ''));
+}
