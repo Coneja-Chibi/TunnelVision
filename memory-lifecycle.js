@@ -63,6 +63,7 @@ import {
 } from "./background-events.js";
 import { getWorldStateText } from "./world-state.js";
 import { shuffleArray, isSystemEntry } from "./shared-utils.js";
+import { isOocUserTurn } from "./turn-classification.js";
 import { isStaticEntry } from "./entry-protection.js";
 import {
   LIFECYCLE_BATCH_LIMIT,
@@ -1099,6 +1100,7 @@ const _chatRef = { lastChatLength: 0 };
 function onAiMessageReceived() {
   const settings = getSettings();
   if (!settings.lifecycleEnabled || settings.globalEnabled === false) return;
+  if (isOocUserTurn(getContext().chat)) return;
   if (shouldSkipAiMessage(_chatRef)) return;
 
   if (shouldRunLifecycle()) {

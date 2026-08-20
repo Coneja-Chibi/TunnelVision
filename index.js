@@ -42,6 +42,7 @@ import { abortSidecarFetches, isRetrievalScopeOpen } from './llm-sidecar.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
 import { findEntryByUid } from './entry-manager.js';
+import { isOocTurn, isOocUserTurn, suppressTunnelVisionWriteTools } from './turn-classification.js';
 
 const EXTENSION_NAME = 'tunnelvision';
 const EXTENSION_FOLDER = `third-party/TunnelVision`;
@@ -49,6 +50,9 @@ const EXTENSION_FOLDER = `third-party/TunnelVision`;
 // Guard: prevents tool re-registration when WORLDINFO_UPDATED fires during generation
 // (lorebook saves from tool actions trigger this event mid-generation).
 let _generationInProgress = false;
+// True from the start of an OOC generation until its response event finishes.
+// Retrieval still runs; this suppresses only the write paths.
+let _skipTunnelVisionForOoc = false;
 
 // Tracks recursion depth for tool-call passes within a single generation turn.
 // ST's Generate() increments depth internally but doesn't expose it to extensions,
@@ -178,6 +182,7 @@ async function init() {
         eventSource.on(event_types.GENERATION_ENDED, () => {
             console.debug('[TunnelVision] GENERATION_ENDED — clearing generation guards');
             _generationInProgress = false;
+            _skipTunnelVisionForOoc = false;
             _toolRecursionDepth = 0;
             _skipPreCommandGeneration = false;
             _keywordTriggeredUids.clear();
@@ -188,6 +193,7 @@ async function init() {
             eventSource.on(event_types.GENERATION_STOPPED, () => {
                 console.debug('[TunnelVision] GENERATION_STOPPED — clearing generation guards');
                 _generationInProgress = false;
+                _skipTunnelVisionForOoc = false;
                 _toolRecursionDepth = 0;
                 _skipPreCommandGeneration = false;
                 window.TunnelVision_isRecursiveToolPass = false;
@@ -252,6 +258,7 @@ async function init() {
 }
 
 async function onChatChanged() {
+    _skipTunnelVisionForOoc = false;
     // A stale sidecar retrieval injection from the previous chat must not
     // leak into the newly loaded one.
     clearRetrievalPrompt(getSettings());
@@ -935,6 +942,16 @@ function convertToolChoiceToAnthropicFormat(toolChoice) {
 function onChatCompletionSettingsReady(data) {
     if (!_generationInProgress) return;
 
+    // An OOC turn still gets retrieved lorebook context, but must not be able to
+    // write. Strip TunnelVision's writing tools from this one request, keeping
+    // the read-only ones and any tool belonging to another extension. Tools stay
+    // registered globally so the next in-character turn is unaffected.
+    if (_skipTunnelVisionForOoc) {
+        const removed = suppressTunnelVisionWriteTools(data);
+        console.debug(`[TunnelVision] OOC turn — removed ${removed} TunnelVision write tool(s) from API request`);
+        return;
+    }
+
     // ── Final-pass tool stripping ────────────────────────────────────
     const recurseLimit = ToolManager.RECURSE_LIMIT ?? 5;
     if (recurseLimit > 1 && _toolRecursionDepth >= recurseLimit - 1) {
@@ -958,6 +975,20 @@ function isPendingSlashCommandGeneration(type) {
     }
 }
 
+/**
+ * Read user input during GENERATION_STARTED. At this point SillyTavern has not
+ * yet copied normal textarea input into the chat array.
+ *
+ * @returns {string}
+ */
+function getPendingUserInput() {
+    try {
+        return String($('#send_textarea').val() || '');
+    } catch {
+        return '';
+    }
+}
+
 function onGenerationAfterCommands(_type, _opts, dryRun) {
     if (dryRun) return;
     _skipPreCommandGeneration = false;
@@ -977,6 +1008,7 @@ async function onGenerationStarted(type, opts, dryRun) {
     _stopRequestedDuringRetrieval = false;
 
     if (isPendingSlashCommandGeneration(type)) {
+        _skipTunnelVisionForOoc = false;
         _skipPreCommandGeneration = true;
         _generationInProgress = false;
         _toolRecursionDepth = 0;
@@ -1012,6 +1044,16 @@ async function onGenerationStarted(type, opts, dryRun) {
     window.TunnelVision_toolRecursionDepth = _toolRecursionDepth;
 
     const settings = getSettings();
+
+    // An OOC aside is a question *about* the story, so retrieval still runs and
+    // the model still gets its lorebook context. Only writing is suppressed:
+    // the write tools are stripped from the request (onChatCompletionSettingsReady),
+    // the "you MUST call a tool" instruction is withheld below, and every
+    // post-turn writer returns early on MESSAGE_RECEIVED.
+    _skipTunnelVisionForOoc = isOocTurn(context.chat, getPendingUserInput());
+    if (_skipTunnelVisionForOoc) {
+        console.log('[TunnelVision] OOC turn — retrieval still runs, writes suppressed');
+    }
 
     // On recursive passes, clear the mandatory tool prompt so the model isn't
     // told "you MUST call a tool" when it already has tool results and should
@@ -1066,6 +1108,7 @@ async function onGenerationStarted(type, opts, dryRun) {
 
     if (
         settings.globalEnabled !== false
+        && !_skipTunnelVisionForOoc
         && settings.mandatoryTools
         && ToolManager.canPerformToolCalls(type)
         && runtimeState?.activeBooks?.length > 0
@@ -1125,14 +1168,21 @@ async function onMessageReceived(messageId, type) {
     console.debug(`[TunnelVision] MESSAGE_RECEIVED: messageId=${messageId} type="${type}"`);
     // Clear generation guards BEFORE the sidecar writer runs, so that lorebook
     // writes triggered by the writer do not get blocked by the generation guard.
+    const skipOocTurn = _skipTunnelVisionForOoc || isOocUserTurn(getContext().chat);
     _generationInProgress = false;
     _skipPreCommandGeneration = false;
+    _skipTunnelVisionForOoc = false;
     window.TunnelVision_isRecursiveToolPass = false;
 
     try {
         await flushPendingSummaryHide();
     } catch (err) {
         console.error('[TunnelVision] Failed to flush pending summary hide:', err);
+    }
+
+    if (skipOocTurn) {
+        console.debug('[TunnelVision] OOC turn — skipping post-generation sidecar writer');
+        return;
     }
 
     // Never run sidecar writer on swipes, continues, first messages, regenerations,

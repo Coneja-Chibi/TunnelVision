@@ -50,6 +50,7 @@ import {
   SECRET_TAG_RE,
   SECRET_GUARD_LINE,
 } from "./shared-utils.js";
+import { isOocUserTurn } from "./turn-classification.js";
 import {
   HOT_RECENCY_MS,
   WARM_RECENCY_MS,
@@ -1642,6 +1643,7 @@ function formatEntryForInjection(
 function onMessageReceived() {
   try {
     const context = getContext();
+    if (isOocUserTurn(context.chat)) return;
     const lastMsg = context.chat?.[context.chat.length - 1];
     if (
       Array.isArray(lastMsg?.extra?.tool_invocations) &&
