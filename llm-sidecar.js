@@ -205,7 +205,7 @@ async function _callOpenAI({ endpoint, apiKey, model, systemPrompt, prompt, temp
     // Matches _embedOpenAI, which already sets the header conditionally.
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
     if (/openrouter\.ai/i.test(url)) {
-        headers['HTTP-Referer'] = (typeof window !== 'undefined' && window.location?.origin) || 'https://sillytavern.app';
+        headers['HTTP-Referer'] = 'https://sillytavern.app';
         headers['X-Title'] = 'TunnelVision';
     }
     const messages = [];
