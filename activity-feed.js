@@ -11,6 +11,7 @@ import { getSettings, isLorebookEnabled, getTree } from './tree-store.js';
 import { openTreeEditorForBook } from './ui-controller.js';
 import { getSidecarModelLabel } from './llm-sidecar.js';
 import { _registerFeedCallbacks, clearFailedTasks } from './background-events.js';
+import { migrateLegacyThemeColors } from './theme.js';
 
 const MAX_FEED_ITEMS = 50;
 const MAX_RENDERED_RETRIEVED_ENTRIES = 5;
@@ -67,9 +68,9 @@ let panelBody = null;
 
 // Tool display config
 const TOOL_DISPLAY = {
-    'TunnelVision_Search':     { icon: 'fa-magnifying-glass', verb: 'Searched', color: '#e84393', activeVerb: 'Searching…' },
+    'TunnelVision_Search':     { icon: 'fa-magnifying-glass', verb: 'Searched', color: 'var(--tv-color-primary)', activeVerb: 'Searching…' },
     'TunnelVision_Remember':   { icon: 'fa-brain',           verb: 'Remembered', color: '#6c5ce7', activeVerb: 'Remembering…' },
-    'TunnelVision_Update':     { icon: 'fa-pen',             verb: 'Updated', color: '#f0946c', activeVerb: 'Updating…' },
+    'TunnelVision_Update':     { icon: 'fa-pen',             verb: 'Updated', color: 'var(--tv-color-secondary)', activeVerb: 'Updating…' },
     'TunnelVision_Forget':     { icon: 'fa-eraser',          verb: 'Forgot', color: '#ef4444', activeVerb: 'Forgetting…' },
     'TunnelVision_Reorganize': { icon: 'fa-arrows-rotate',   verb: 'Reorganized', color: '#00b894', activeVerb: 'Reorganizing…' },
     'TunnelVision_Summarize':  { icon: 'fa-file-lines',      verb: 'Summarized', color: '#fdcb6e', activeVerb: 'Summarizing…' },
@@ -176,6 +177,7 @@ function loadFeed() {
         if (data && Array.isArray(data.items)) {
             feedItems = data.items;
             nextId = typeof data.nextId === 'number' ? data.nextId : feedItems.length;
+            if (migrateLegacyThemeColors(feedItems)) saveFeed();
         }
     } catch { /* no active chat */ }
 }
@@ -1118,7 +1120,7 @@ function createEntryFeedItem({ source, lorebook = '', uid = null, title = '', ke
         constant,
         icon: constant ? 'fa-thumbtack' : 'fa-book-open',
         verb: constant ? 'Constant' : (source === 'native' ? 'Triggered' : 'Injected'),
-        color: constant ? '#636e72' : (source === 'native' ? '#e84393' : '#fdcb6e'),
+        color: constant ? '#636e72' : (source === 'native' ? 'var(--tv-color-primary)' : '#fdcb6e'),
         lorebook,
         uid,
         title,

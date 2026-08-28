@@ -1344,7 +1344,7 @@ function reportPreWarmCandidates(candidates, cacheKey, source = "smart-context")
   addBackgroundEvent({
     icon: isFactDriven ? 'fa-brain' : 'fa-forward',
     verb: 'Pre-warmed',
-    color: isFactDriven ? '#e84393' : '#fdcb6e',
+    color: isFactDriven ? 'var(--tv-color-primary)' : '#fdcb6e',
     summary: `${candidates.length} smart-context entr${candidates.length === 1 ? 'y' : 'ies'} cached for the next prompt`,
     details: [isFactDriven ? 'Refreshed after post-turn fact updates' : 'Ready for next turn'],
     relatedEntries,

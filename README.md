@@ -396,6 +396,7 @@ That's it. TunnelVision registers its tools automatically. Your AI will start us
 | Setting | Default | What It Does |
 |---------|---------|-------------|
 | 🔧 Global Enable | ✅ On | Master kill switch for everything |
+| 🎨 Appearance → Color Theme | TunnelVision Pink | Keep the original palette, follow the active SillyTavern theme, or use any installed SillyTavern theme for TunnelVision only |
 | 🔍 Search Mode | Traversal | How the AI browses the channel guide (traversal vs collapsed) |
 | 🔄 Recurse Limit | 5 | Max recursive tool calls per generation (higher = deeper channel surfing) |
 | 🧠 LLM Build Detail | Full | How much entry content the LLM sees during tree building |

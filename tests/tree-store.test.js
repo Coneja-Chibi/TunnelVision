@@ -35,6 +35,7 @@ describe('getSettings normalization', () => {
         const settings = getSettings();
 
         expect(settings.globalEnabled).toBe(SETTING_DEFAULTS.globalEnabled);
+        expect(settings.colorTheme).toBe('brand');
         expect(settings.llmBuildDetail).toBe('lite');
         expect(settings.trackerUids).toEqual({});
         expect(settings.ephemeralToolFilter).toEqual(SETTING_DEFAULTS.ephemeralToolFilter);

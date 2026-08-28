@@ -284,6 +284,22 @@ describe('feed-storage', () => {
             expect(save).toHaveBeenCalledTimes(1);
         });
 
+        it('replaces saved brand colors with live theme tokens', () => {
+            const items = [
+                { id: 2, type: 'tool', color: '#e84393' },
+                { id: 3, type: 'tool', color: '#f0946c' },
+            ];
+            const save = vi.fn();
+
+            migrateFeedItems(items, { save });
+
+            expect(items.map(item => item.color)).toEqual([
+                'var(--tv-color-primary)',
+                'var(--tv-color-secondary)',
+            ]);
+            expect(save).toHaveBeenCalledTimes(1);
+        });
+
         it('backfills legacy entry items so they still render as feed entries', () => {
             const items = [{
                 id: 2,
@@ -301,7 +317,7 @@ describe('feed-storage', () => {
                 source: 'native',
                 icon: 'fa-book-open',
                 verb: 'Triggered',
-                color: '#e84393',
+                color: 'var(--tv-color-primary)',
                 keys: [],
             });
             expect(save).toHaveBeenCalledTimes(1);

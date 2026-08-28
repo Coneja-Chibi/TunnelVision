@@ -276,7 +276,7 @@ export async function renderTreeEditor(bookName, tree) {
         });
     }
     categories.push(...(tree.root.children || []));
-    const colors = ['#e84393', '#f0946c', '#6c5ce7', '#00b894', '#fdcb6e'];
+    const colors = ['var(--tv-color-primary)', 'var(--tv-color-secondary)', '#6c5ce7', '#00b894', '#fdcb6e'];
     for (let i = 0; i < categories.length; i++) {
         const cat = categories[i];
         const count = getAllEntryUids(cat).length;

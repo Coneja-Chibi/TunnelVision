@@ -16,6 +16,27 @@
                 Replaces keyword triggers with LLM-driven tree search. The model navigates a hierarchical index of your lorebook entries, retrieving only what's relevant to the current scene.
             </div>
 
+            <!-- Appearance -->
+            <details id="tv_appearance_menu" class="tv-card tv-appearance-menu">
+                <summary class="tv-card-header">
+                    <i class="fa-solid fa-palette"></i>
+                    <span>Appearance</span>
+                    <i class="fa-solid fa-chevron-down tv-appearance-chevron"></i>
+                </summary>
+                <div class="tv-card-body">
+                    <div class="tv-setting-row">
+                        <label class="tv-label" for="tv_color_theme">Color Theme</label>
+                        <select id="tv_color_theme" class="tv-select" aria-describedby="tv_color_theme_help">
+                            <option value="brand">TunnelVision Pink</option>
+                            <option value="sillytavern">Follow active SillyTavern theme</option>
+                            <optgroup id="tv_installed_theme_options" label="Installed SillyTavern themes">
+                            </optgroup>
+                        </select>
+                        <div id="tv_color_theme_help" class="tv-help-text">Use TunnelVision Pink, follow the active interface theme, or apply an installed SillyTavern theme to TunnelVision only.</div>
+                    </div>
+                </div>
+            </details>
+
             <!-- Global Enable -->
             <div class="tv-setting-row">
                 <label class="tv-toggle">

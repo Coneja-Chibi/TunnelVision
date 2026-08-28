@@ -18,6 +18,7 @@ import {
     getNextId,
     setNextId,
 } from '../feed-state.js';
+import { migrateLegacyThemeColors } from '../theme.js';
 
 // Storage key used inside chat metadata
 export const METADATA_KEY = 'tunnelvision_feed';
@@ -111,7 +112,7 @@ export function loadFeed({
 export function migrateFeedItems(items, { trackerSuggestionNameRe = null, save = null } = {}) {
     if (!Array.isArray(items) || items.length === 0) return;
 
-    let mutated = false;
+    let mutated = migrateLegacyThemeColors(items);
 
     for (const item of items) {
         if (!item || typeof item !== 'object') continue;
@@ -145,7 +146,7 @@ export function migrateFeedItems(items, { trackerSuggestionNameRe = null, save =
 
             const expectedColor = inferredSource === 'tunnelvision' || inferredSource === 'smart-context'
                 ? '#fdcb6e'
-                : '#e84393';
+                : 'var(--tv-color-primary)';
             if (!item.color) {
                 item.color = expectedColor;
                 mutated = true;
