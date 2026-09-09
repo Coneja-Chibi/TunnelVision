@@ -78,6 +78,7 @@ import {
     runPostTurnProcessor,
     shouldInvalidateSmartContextPreWarm,
     refreshSmartContextAfterPostTurn,
+    createTrackerForCharacter,
 } from '../post-turn-processor.js';
 import { getSettings } from '../tree-store.js';
 import { getActiveTunnelVisionBooks, resolveTargetBook } from '../tool-registry.js';
@@ -301,6 +302,84 @@ describe('updateTrackers', () => {
             content: '## Current Status\nLocation: safehouse',
             _backgroundSource: 'post-turn',
         });
+    });
+});
+
+describe('runPostTurnProcessor permission enforcement', () => {
+    it('resolves the target book with checkWrite so read-only books are excluded', async () => {
+        getContext.mockReturnValue({
+            chat: [
+                { is_user: true, mes: 'Hello' },
+                { is_user: false, mes: 'Hi there' },
+            ],
+            chatMetadata: {},
+            saveMetadataDebounced: vi.fn(),
+        });
+
+        await runPostTurnProcessor(true);
+
+        expect(resolveTargetBook).toHaveBeenCalledWith('test-book', { checkWrite: true });
+    });
+
+    it('no-ops instead of writing when the only active book is read-only', async () => {
+        getSettings.mockReturnValue({
+            postTurnEnabled: true,
+            globalEnabled: true,
+            postTurnExtractFacts: true,
+            postTurnUpdateTrackers: false,
+            postTurnSceneArchive: false,
+        });
+        getContext.mockReturnValue({
+            chat: [
+                { is_user: true, mes: 'Hello' },
+                { is_user: false, mes: 'Hi there' },
+                { is_user: true, mes: 'Remember Elena' },
+                { is_user: false, mes: 'Elena is important' },
+            ],
+            chatMetadata: {},
+            saveMetadataDebounced: vi.fn(),
+        });
+        // Simulates the real resolveTargetBook's behavior when the sole active
+        // book is read-only and checkWrite is honored.
+        resolveTargetBook.mockReturnValue({
+            book: '',
+            error: 'No writable lorebooks. All active lorebooks are set to read-only.',
+        });
+
+        const createEntry = (await import('../entry-manager.js')).createEntry;
+
+        const result = await runPostTurnProcessor(true);
+
+        expect(result).toBeNull();
+        expect(createEntry).not.toHaveBeenCalled();
+    });
+});
+
+describe('createTrackerForCharacter permission enforcement', () => {
+    it('resolves the target book with checkWrite', async () => {
+        getActiveTunnelVisionBooks.mockReturnValue(['test-book']);
+        resolveTargetBook.mockReturnValue({ book: 'test-book', error: null });
+
+        // Not asserting on the resolved tracker here (that requires a fuller
+        // mock of getCachedWorldInfo/generateAnalytical) — only that the
+        // permission-checked resolver is used before any write is attempted.
+        try {
+            await createTrackerForCharacter('Elena');
+        } catch {
+            // Downstream steps aren't fully mocked in this suite; irrelevant here.
+        }
+
+        expect(resolveTargetBook).toHaveBeenCalledWith('test-book', { checkWrite: true });
+    });
+
+    it('throws instead of writing when the only active book is read-only', async () => {
+        getActiveTunnelVisionBooks.mockReturnValue(['test-book']);
+        resolveTargetBook.mockReturnValue({
+            book: '',
+            error: 'No writable lorebooks. All active lorebooks are set to read-only.',
+        });
+
+        await expect(createTrackerForCharacter('Elena')).rejects.toThrow(/read-only/);
     });
 });
 
