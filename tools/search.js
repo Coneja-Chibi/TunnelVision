@@ -18,7 +18,7 @@ import {
     getSettings,
 } from '../tree-store.js';
 import { getReadableBooks } from '../tool-registry.js';
-import { getKeywordTriggeredUids } from '../index.js';
+import { getKeywordTriggeredUids } from '../keyword-trigger-state.js';
 import { getInjectedNodeIds } from '../sidecar-retrieval.js';
 
 // ─── Loop Detection ─────────────────────────────────────────────

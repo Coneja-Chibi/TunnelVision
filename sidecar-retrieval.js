@@ -27,7 +27,7 @@ import { getReadableBooks } from './tool-registry.js';
 import { hasEvaluableConditions, separateConditions, mapSelectiveLogic, describeSelectiveLogic, CONDITION_DESCRIPTIONS, CONDITION_LABELS, rollKeywordProbability, formatCondition } from './conditions.js';
 import { isSidecarConfigured, isCircuitOpen, sidecarGenerate, getSidecarModelLabel, beginRetrievalScope, endRetrievalScope } from './llm-sidecar.js';
 import { logSidecarRetrieval, logConditionalEvaluations, setSidecarActive } from './activity-feed.js';
-import { getKeywordTriggeredUids } from './index.js';
+import { getKeywordTriggeredUids } from './keyword-trigger-state.js';
 import { applyBackgroundPromptAddendum, buildLanguageDirective } from './agent-utils.js';
 
 const TV_SIDECAR_RETRIEVAL_KEY = 'tunnelvision_sidecar_retrieval';

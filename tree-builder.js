@@ -396,7 +396,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
  * @param {number} charLimit - Max characters per chunk
  * @returns {Object[][]} Array of entry chunks
  */
-function chunkEntries(entries, detail, charLimit) {
+export function chunkEntries(entries, detail, charLimit) {
     if (entries.length === 0) return [];
 
     const chunks = [];
@@ -431,7 +431,7 @@ function chunkEntries(entries, detail, charLimit) {
  * @param {import('./tree-store.js').TreeNode} root
  * @returns {string[]}
  */
-function extractCategoryLabels(root) {
+export function extractCategoryLabels(root) {
     const labels = [];
     for (const child of (root.children || [])) {
         const count = getAllEntryUids(child).length;
@@ -457,7 +457,7 @@ function extractCategoryLabels(root) {
  * @param {string[]} existingCategories
  * @returns {string}
  */
-function buildContinuationPrompt(lorebookName, entries, existingCategories, totalEntryCount = 0) {
+export function buildContinuationPrompt(lorebookName, entries, existingCategories, totalEntryCount = 0) {
     const detail = getSettings().llmBuildDetail || 'full';
     const entryList = entries.map(e => `  - ${formatEntryForLLM(e, detail)}`).join('\n');
     const catList = existingCategories.map(c => `  - ${c}`).join('\n');

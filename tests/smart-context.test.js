@@ -28,6 +28,10 @@ function makeEntry(overrides = {}) {
 // Mock internal dependencies with complex transitive imports
 vi.mock('../tool-registry.js', () => ({
     getActiveTunnelVisionBooks: vi.fn(() => mockState.activeBooks),
+    // No book in these tests is configured as a native-injection book, so
+    // this matches the real getInjectionManagedBooks() (which just filters
+    // those out of getActiveTunnelVisionBooks()) for the cases exercised here.
+    getInjectionManagedBooks: vi.fn(() => mockState.activeBooks),
 }));
 vi.mock('../entry-manager.js', () => ({
     getCachedWorldInfoSync: vi.fn((book) => mockState.cachedWorldInfoSyncByBook.get(book) || null),
@@ -35,6 +39,8 @@ vi.mock('../entry-manager.js', () => ({
         mockState.cachedWorldInfoCalls.push(book);
         return mockState.cachedWorldInfoSyncByBook.get(book) || null;
     }),
+    // Matches the real getEntryTurnIndex's default when no temporal data is recorded.
+    getEntryTurnIndex: vi.fn(() => -1),
 }));
 vi.mock('../world-state.js', () => ({
     getWorldStateSections: vi.fn(() => ({})),

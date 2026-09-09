@@ -37,10 +37,9 @@ import {
 import { buildTreeFromMetadata, buildTreeWithLLM, generateSummariesForTree, ingestChatMessages } from './tree-builder.js';
 import { testSidecarConnectivity, testEmbeddingConnectivity } from './llm-sidecar.js';
 import { isEmbeddingAvailable } from './embedding-cache.js';
-import { registerTools, unregisterTools, getDefaultToolDescriptions, stripDynamicContent } from './tool-registry.js';
+import { registerTools, unregisterTools, getDefaultToolDescriptions, stripDynamicContent, applyRecurseLimit } from './tool-registry.js';
 import { runDiagnostics } from './diagnostics.js';
 import { clearRetrievalPrompt } from './sidecar-retrieval.js';
-import { applyRecurseLimit } from './index.js';
 import { refreshHiddenToolCallMessages } from './activity-feed.js';
 import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TYPES, CONDITION_LABELS, getKeywordProbability, setKeywordProbability } from './conditions.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';

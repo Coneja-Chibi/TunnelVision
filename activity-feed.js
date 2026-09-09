@@ -1189,7 +1189,7 @@ function extractRetrievedEntries(result) {
     return entries;
 }
 
-function parseRetrievedEntryHeader(line) {
+export function parseRetrievedEntryHeader(line) {
     if (!line.startsWith('[Lorebook: ') || !line.endsWith(']')) {
         return null;
     }
@@ -1214,7 +1214,7 @@ function parseRetrievedEntryHeader(line) {
 
 // ── Tool Summary Builder ──
 
-function buildToolSummary(toolName, params, result, retrievedEntries = []) {
+export function buildToolSummary(toolName, params, result, retrievedEntries = []) {
     switch (toolName) {
         case 'TunnelVision_Search': {
             const action = params.action || 'retrieve';

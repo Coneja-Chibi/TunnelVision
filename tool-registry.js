@@ -36,6 +36,24 @@ const ALL_TOOL_NAMES = [SEARCH_NAME, REMEMBER_NAME, UPDATE_NAME, FORGET_NAME, RE
 export const DYNAMIC_DELIMITER = '\n\n---TV_DYNAMIC_BELOW---\n';
 
 /**
+ * Apply the user's RECURSE_LIMIT override to ToolManager.
+ * Only overrides when the user has set a value different from the default (5).
+ * Stores the original value so we can restore on disable.
+ * @param {Object} settings
+ */
+const ST_DEFAULT_RECURSE_LIMIT = 5;
+
+export function applyRecurseLimit(settings) {
+    const limit = Number(settings.recurseLimit);
+    if (!isFinite(limit) || limit < 1) {
+        ToolManager.RECURSE_LIMIT = ST_DEFAULT_RECURSE_LIMIT;
+        return;
+    }
+    // Clamp to sane range: 1–50. Over 50 is almost certainly a mistake.
+    ToolManager.RECURSE_LIMIT = Math.min(Math.max(Math.round(limit), 1), 50);
+}
+
+/**
  * Strip dynamic content (tree overview, tracker list) from a description string.
  * Returns only the user-editable portion above the delimiter.
  * Also handles legacy format where tree overview was baked in without a delimiter.
