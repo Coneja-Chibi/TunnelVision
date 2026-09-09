@@ -121,15 +121,14 @@ vi.mock('./tree-store.js', () => ({
 // --- Import under test -------------------------------------------------
 
 import {
+  splitEntriesForTree,
+  getTreeBuildSettings,
+  assignUnassignedEntries,
+  pinSummaryEntries,
   extractCategoryLabels,
   buildContinuationPrompt,
   chunkEntries,
 } from '../tree-builder.js';
-// splitEntriesForTree, getTreeBuildSettings, assignUnassignedEntries, and
-// pinSummaryEntries are not implemented anywhere in tree-builder.js (not even
-// as unexported helpers) — these "refactor coverage" tests were written
-// ahead of a refactor that never landed. Left as describe.skip below rather
-// than guessing at intended behavior; tracked as a follow-up.
 
 // --- Helpers -----------------------------------------------------------
 
@@ -153,7 +152,7 @@ describe('tree-builder helper functions (refactor coverage)', () => {
     mockSettings.treeGranularity = 2;
   });
 
-  describe.skip('splitEntriesForTree', () => {
+  describe('splitEntriesForTree', () => {
     it('splits active non-summary entries and summary entries', () => {
       const bookData = {
         entries: {
@@ -192,7 +191,7 @@ describe('tree-builder helper functions (refactor coverage)', () => {
     });
   });
 
-  describe.skip('getTreeBuildSettings', () => {
+  describe('getTreeBuildSettings', () => {
     it('returns explicit settings values', () => {
       const out = getTreeBuildSettings({ llmBuildDetail: 'lite', llmChunkTokens: 12345 });
       expect(out).toEqual({ detail: 'lite', chunkLimit: 12345 });
@@ -281,7 +280,7 @@ describe('tree-builder helper functions (refactor coverage)', () => {
     });
   });
 
-  describe.skip('assignUnassignedEntries', () => {
+  describe('assignUnassignedEntries', () => {
     it('adds only missing UIDs to root', () => {
       const tree = {
         root: {
@@ -307,7 +306,7 @@ describe('tree-builder helper functions (refactor coverage)', () => {
     });
   });
 
-  describe.skip('pinSummaryEntries', () => {
+  describe('pinSummaryEntries', () => {
     it('creates Summaries node when missing and pins entries', () => {
       const tree = {
         root: {
