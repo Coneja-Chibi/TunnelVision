@@ -128,6 +128,7 @@ import {
   extractCategoryLabels,
   buildContinuationPrompt,
   chunkEntries,
+  getIngestText,
 } from '../tree-builder.js';
 
 // --- Helpers -----------------------------------------------------------
@@ -352,5 +353,40 @@ describe('tree-builder helper functions (refactor coverage)', () => {
       pinSummaryEntries(tree, []);
       expect(tree.root.children).toEqual([]);
     });
+  });
+});
+describe('getIngestText', () => {
+  it('reads a visible message', () => {
+    expect(getIngestText({ mes: 'Yumi drew her sword.' }, false)).toBe('Yumi drew her sword.');
+  });
+
+  it('skips hidden messages unless includeHidden is set', () => {
+    const msg = { mes: 'Yumi drew her sword.', is_system: true };
+    expect(getIngestText(msg, false)).toBeNull();
+    expect(getIngestText(msg, true)).toBe('Yumi drew her sword.');
+  });
+
+  it('never reads TunnelVision summary markers', () => {
+    const marker = { mes: '📝 **Chapter 1**\n\nThey met.', is_system: true, extra: { tunnelvision_summary: true } };
+    expect(getIngestText(marker, true)).toBeNull();
+  });
+
+  it('drops markdown-image messages, with or without includeHidden', () => {
+    const img = { mes: '![generated image](/user/images/Yumi/imagine_1786700703934_0.webp)' };
+    expect(getIngestText(img, false)).toBeNull();
+    expect(getIngestText(img, true)).toBeNull();
+  });
+
+  it('keeps the caption when a message has both text and an image', () => {
+    const msg = { mes: 'Yumi at the shrine.\n\n![generated image](/user/images/Yumi/imagine_1.webp)' };
+    expect(getIngestText(msg, false)).toBe('Yumi at the shrine.');
+  });
+
+  it('drops html media and native ST attachments', () => {
+    expect(getIngestText({ mes: '<video src="/user/images/a.mp4"></video>' }, false)).toBeNull();
+    expect(getIngestText({
+      mes: 'masterpiece, 1girl, shrine',
+      extra: { media: [{ type: 'image', url: '/user/images/a.png' }], inline_image: false },
+    }, false)).toBeNull();
   });
 });

@@ -284,6 +284,7 @@ export const SETTING_DEFAULTS = {
     llmBuildDetail: 'lite',
     treeGranularity: 0,
     llmChunkTokens: 30000,
+    ingestHidden: false,
     commandContextMessages: 50,
     autoSummaryEnabled: false,
     autoSummaryInterval: 20,

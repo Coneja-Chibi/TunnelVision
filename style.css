@@ -1227,7 +1227,11 @@
 }
 
 /* ===== Checkbox Row ===== */
-.tv-checkbox-row {
+/* tv-toggle-row is an alias used across settings.html; without it those rows
+   fall back to unstyled block layout -- checkbox stacked above a heading-sized
+   label. */
+.tv-checkbox-row,
+.tv-toggle-row {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1235,8 +1239,11 @@
     cursor: pointer;
 }
 
-.tv-checkbox-row input[type="checkbox"] {
+.tv-checkbox-row input[type="checkbox"],
+.tv-toggle-row input[type="checkbox"] {
     accent-color: #e84393;
+    flex-shrink: 0;
+    margin: 0;
 }
 
 /* ===== Warning Text ===== */

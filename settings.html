@@ -193,7 +193,19 @@
                                     <input id="tv_ingest_to" type="number" class="tv-number-input" min="0" value="0" />
                                 </div>
                             </div>
-                            <div id="tv_ingest_chat_info" class="tv-help-text" style="margin: 6px 0; opacity: 0.6;"></div>
+                            <label class="tv-checkbox-row" style="margin-top: 10px;">
+                                <input id="tv_ingest_hidden" type="checkbox" />
+                                <span>Include hidden messages</span>
+                            </label>
+                            <div class="tv-help-text" style="margin-top: 4px;">
+                                Messages marked with a ghost icon in chat are hidden from the prompt and skipped by
+                                default. Turn this on to ingest them too &mdash; useful when older messages have been
+                                hidden out of context. Images and videos are skipped either way.
+                            </div>
+                            <div id="tv_ingest_chat_info" class="tv-status-bar" style="margin-top: 10px;">
+                                <i id="tv_ingest_info_icon" class="fa-solid fa-circle-info"></i>
+                                <span id="tv_ingest_info_text"></span>
+                            </div>
                             <button id="tv_ingest_chat" class="tv-btn tv-btn-primary" style="width:100%; margin-top: 8px;">
                                 <i class="fa-solid fa-download"></i> Ingest Messages
                             </button>

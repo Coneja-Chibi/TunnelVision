@@ -931,6 +931,37 @@ export async function ingestChatMessages(lorebookName, options) {
     return withSidecarOrCurrentApi(() => _ingestChatMessages(lorebookName, options));
 }
 
+/**
+ * The text a message contributes to an ingest, or null if it contributes nothing.
+ *
+ * Exported so the settings panel can count what an ingest would actually read
+ * without duplicating the rules — a preview that disagrees with the run is worse
+ * than no preview.
+ *
+ * @param {object} msg - A chat message
+ * @param {boolean} includeHidden - Read messages hidden from context
+ * @returns {string|null}
+ */
+export function getIngestText(msg, includeHidden) {
+    if (!msg) return null;
+
+    // "Hidden" is is_system. /hide sets it, and so does every extension that
+    // pulls old messages out of context. TunnelVision's own summary markers stay
+    // out either way: their text already lives in the lorebook.
+    if (msg.is_system && (!includeHidden || msg.extra?.tunnelvision_summary)) return null;
+
+    // Native ST attachments live in extra.media; inline_image false means the
+    // media IS the message and its text is just a generation prompt.
+    if (msg.extra?.media?.length && msg.extra.inline_image === false) return null;
+
+    // Other extensions write the attachment into the body as markdown instead.
+    const text = (msg.mes || '')
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/<(img|video|audio)\b[^>]*>(?:<\/\1>)?/gi, '')
+        .trim();
+    return text || null;
+}
+
 async function _ingestChatMessages(lorebookName, { from, to, progress, detail }) {
     const context = getContext();
     if (!context.chat || context.chat.length === 0) {
@@ -946,13 +977,13 @@ async function _ingestChatMessages(lorebookName, { from, to, progress, detail })
     const end = Math.max(start, Math.min(to, maxIdx));
 
     // Collect messages in range
+    const includeHidden = !!getSettings().ingestHidden;
     const messages = [];
     for (let i = start; i <= end; i++) {
         const msg = chat[i];
-        if (!msg || msg.is_system) continue;
-        const name = msg.name || (msg.is_user ? 'User' : 'Character');
-        const text = (msg.mes || '').trim();
+        const text = getIngestText(msg, includeHidden);
         if (!text) continue;
+        const name = msg.name || (msg.is_user ? 'User' : 'Character');
         messages.push({ index: i, name, text });
     }
 

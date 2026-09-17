@@ -310,6 +310,12 @@ Type commands directly in the chat box to force specific actions:
 
 The prefix is configurable (default `!`). These strip from your message and inject a forced instruction. The AI has no choice but to comply. 😤
 
+Ingest also has a panel in settings with a message range and an **Include hidden
+messages** toggle. Messages carrying a ghost icon in chat are hidden from the
+prompt, so ingest skips them by default — turn it on when older messages were
+hidden to save context and you want them read anyway. Images and videos are
+skipped either way.
+
 ### 🔄 **Auto-Summary** *(The DVR)*
 
 Configure an interval (e.g., every 20 messages) and TunnelVision will automatically tell the AI "you MUST summarize now." The AI creates a summary of recent events without you lifting a finger.
