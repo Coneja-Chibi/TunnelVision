@@ -278,6 +278,20 @@ export function formatShortDateTime(dateValue) {
     }
 }
 
+/**
+ * First name not in `taken`: `base`, then `base 2`, `base 3`, …
+ * @param {string} base
+ * @param {string[]} taken
+ * @returns {string}
+ */
+export function nextFreeName(base, taken) {
+    const used = new Set(taken || []);
+    if (!used.has(base)) return base;
+    let i = 2;
+    while (used.has(`${base} ${i}`)) i++;
+    return `${base} ${i}`;
+}
+
 // ── Secret-tag convention ────────────────────────────────────────
 // Entries tagged [SECRET …] guide roleplay when a character has not yet
 // learned the information. The tag is not privacy or access control: injected

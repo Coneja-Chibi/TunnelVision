@@ -310,6 +310,18 @@ Type commands directly in the chat box to force specific actions:
 
 The prefix is configurable (default `!`). These strip from your message and inject a forced instruction. The AI has no choice but to comply. 😤
 
+### 💬 **OOC Asides** *(Commercial Break)*
+
+A message marked as out-of-character still gets full lorebook retrieval — it's a
+question *about* the story — but it can't write. Write tools are stripped from the
+request, the mandatory-tool instruction is withheld, and every post-turn writer
+skips the turn.
+
+**Recognised OOC markers:** `OOC: ...`, `(OOC: ...)`, `((OOC: ...))`,
+`[OOC: ...]`, `<OOC> ...`, `**OOC** ...` — the literal word must be the first
+token. A bare `[ ... ]` or `(( ... ))` is *not* treated as OOC, since those are
+ordinary action beats and sound effects.
+
 ### 🔄 **Auto-Summary** *(The DVR)*
 
 Configure an interval (e.g., every 20 messages) and TunnelVision will automatically tell the AI "you MUST summarize now." The AI creates a summary of recent events without you lifting a finger.
@@ -357,7 +369,6 @@ One-click diagnostic panel that checks **everything**:
 
 - **SillyTavern** (latest version recommended)
 - **An API that supports tool calling** (Claude, GPT-4, Gemini, etc.)
-- **At least one lorebook** with entries you want TunnelVision to manage
 
 ### Step 1: Install 📥
 
@@ -367,14 +378,51 @@ Paste this URL into SillyTavern's "Install Extension" input:
 https://github.com/Coneja-Chibi/TunnelVision
 ```
 
-### Step 2: Enable & Configure 📡
+### Step 2: Set Up a Chat 📡
 
-1. **🔧 Enable Master Toggle**: Turn on TunnelVision in Extension Settings
-2. **📚 Select Lorebooks**: Check which lorebooks TunnelVision should manage
-3. **🌳 Build Trees**: Click "Build Tree" for each enabled lorebook
-   - **Quick Build**: Metadata-only, instant, no LLM calls
-   - **Build With LLM**: Generates summaries for each channel node (better retrieval, costs tokens)
-4. **✅ Run Diagnostics**: Click "Run Diagnostics" to verify everything is green
+1. **🔧 Enable Master Toggle**: Switch on **Enable TunnelVision** in Extension Settings.
+2. **🪄 Create Chat Lorebook**: Open a chat and click **Create Chat Lorebook**
+   under *Lorebook Selection*. It suggests a name (`TV - <character>`, then
+   `TV - <character> 2`, …), creates the lorebook, attaches it to this chat, turns
+   TunnelVision on for it and selects it. Every memory TunnelVision saves in
+   this chat goes here. The button is greyed out if the chat already has a chat
+   lorebook, since SillyTavern allows only one.
+   When it's done, a **"TV - &lt;character&gt; is ready"** toast confirms the
+   setup and lists any Character Lore it switched on (step 3). In a chat that
+   already has messages, the toast stays open with a **Next steps** list for
+   step 4 until you close it.
+3. **📖 Character Lore** *(only if the character has lorebooks linked via the
+   globe button, e.g. an embedded lorebook you imported)*: the same popup
+   offers to use them with TunnelVision as well. Leave them ticked — they're set to
+   **Read Only**, so the AI can search the character's lore but never writes chat
+   events into it.
+
+   A **Build Tree Index** dropdown appears only if at least one of these lorebooks
+   has never had a tree built. Your choice applies only to those lorebooks — a lorebook
+   that already has a tree (say, from an earlier chat) is marked **(has a
+   tree)**, keeps it, and is never rebuilt here. The dropdown is greyed out
+   unless a ticked lorebook still needs a tree:
+   - **With LLM**: sorts entries into categories with summaries (better retrieval, costs tokens)
+   - **From Metadata**: groups entries by their existing groups and keys (instant, no LLM calls)
+   - **Later**: select the lorebook in TunnelVision's lorebook list and use its **Build Tree Index** section yourself
+   
+   The tree is saved per lorebook, so later chats with the same character reuse it.
+4. **📥 Existing chat?** With the new lorebook selected, click **Ingest Messages**
+   under **Chat Ingest** to pull facts out of the chat so far. Then, under
+   **Build Tree Index**, click **From Metadata** (free) or **With LLM** (better
+   categories, costs tokens).
+   A brand-new chat needs neither — its lorebook starts with an empty tree and fills
+   up as you play.
+5. **✅ Run Diagnostics**: Click "Run Diagnostics" to verify everything is green.
+
+**Doing it by hand:** attach any lorebook to the chat with SillyTavern's
+passport icon in the character panel (click it and pick the lorebook; once a lorebook
+is attached, a plain click opens it and shift-click or long-press changes it),
+click the lorebook in TunnelVision's lorebook list, switch on **Enable for this lorebook**,
+and use **Build Tree Index**.
+*Tip:* set **Advanced → Lorebooks & Tree Building → Auto-Detect Lorebooks** to
+`TV - {{char}}` and any lorebook whose name contains `TV - <character>` is
+switched on automatically — you only have to attach it.
 
 ### Step 3: Start Chatting 💬
 

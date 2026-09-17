@@ -136,6 +136,12 @@ async function init() {
         eventSource.on(event_types.WORLDINFO_SETTINGS_UPDATED, onWorldInfoUpdated);
     }
     eventSource.on(event_types.APP_READY, onAppReady);
+    // ST emits WORLDINFO_UPDATED before it reloads world_names, so a newly
+    // created/imported/renamed/deleted book is missing from that refresh. ST
+    // changes these selects after the reload, and the chat-lorebook popup's
+    // select emits no ST event at all; refresh on their change instead.
+    $(document).on('change', '#world_editor_select, #character_world, .chat_world_info_selector',
+        () => queueStateRefresh('lorebook list changed', 50));
 
     const refreshEvents = [
         event_types.EXTENSION_SETTINGS_LOADED,
@@ -144,6 +150,8 @@ async function init() {
         event_types.CONNECTION_PROFILE_CREATED,
         event_types.CONNECTION_PROFILE_DELETED,
         event_types.CONNECTION_PROFILE_UPDATED,
+        // Attaching a primary lorebook to a character saves the card.
+        event_types.CHARACTER_EDITED,
     ].filter(Boolean);
     for (const eventName of refreshEvents) {
         eventSource.on(eventName, () => queueStateRefresh(eventName, 50));

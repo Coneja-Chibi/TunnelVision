@@ -2857,3 +2857,28 @@ details.tv-confirm-diff-wrap[open] .tv-confirm-diff-summary::before { content: '
 .tv-adv-search-clear.tv-visible {
     display: inline-block;
 }
+
+/* ===== Create Chat Lorebook popup ===== */
+.tv-create-book-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+    margin-top: 12px;
+}
+
+.tv-create-book-body .text_pole {
+    margin: 0;
+}
+
+.tv-create-book-body .checkbox_label {
+    justify-content: flex-start;
+}
+
+/* Create Chat Lorebook toast: success colour without the tick icon. The
+   selector must outrank ST's `body #toast-container>div` padding. */
+body #toast-container > .tv-toast-plain {
+    background-color: #5d9e5d;
+    background-image: none;
+    padding-left: 10px;
+}

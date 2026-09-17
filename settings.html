@@ -44,6 +44,11 @@
                     </div>
                     <div class="tv-card-body">
                         <div class="tv-help-text" style="margin-bottom: 8px;">Click a lorebook to configure it. Only lorebooks active in the current chat are used for retrieval.</div>
+                        <div class="tv-button-row" style="margin-bottom: 8px;">
+                            <button id="tv_create_chat_book" class="tv-btn tv-btn-secondary" title="Creates a lorebook, attaches it to this chat, and turns TunnelVision on for it.">
+                                <i class="fa-solid fa-plus"></i> Create Chat Lorebook
+                            </button>
+                        </div>
                         <div class="tv-lorebook-filter">
                             <i class="fa-solid fa-magnifying-glass"></i>
                             <input id="tv_lorebook_filter" type="text" placeholder="Filter lorebooks..." />
@@ -243,10 +248,10 @@
                                         <div class="inline-drawer-content" style="display:block;">
 
                                         <div class="tv-help-text" style="margin-bottom: 8px;">
-                                            Auto-enable lorebooks whose names contain this text. Use <code>{{char}}</code> for the current character name.
-                                            <br>Example: <code>TV - {{char}}</code> would auto-enable "TV - Sable" when chatting with Sable.
+                                            Auto-enable lorebooks whose names contain this text. Use <code>\{{char}}</code> for the current character name.
+                                            <br>Example: <code>TV - \{{char}}</code> would auto-enable "TV - Sable" when chatting with Sable.
                                         </div>
-                                        <input type="text" id="tv_auto_detect_pattern" class="text_pole" placeholder="e.g. TV - {{char}}" />
+                                        <input type="text" id="tv_auto_detect_pattern" class="text_pole" placeholder="e.g. TV - \{{char}}" />
                         
                                         </div>
                                     </div>

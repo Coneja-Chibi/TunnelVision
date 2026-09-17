@@ -147,22 +147,7 @@ export function getActiveTunnelVisionBooks() {
     }
 
     // 2. Character-attached lorebooks
-    // In group chats, scan ALL group members instead of just this_chid
-    // (this_chid rotates per character and would flip active books mid-generation)
-    if (selected_group) {
-        const group = groups?.find(g => g.id === selected_group);
-        if (group?.members) {
-            const disabledMembers = new Set(group.disabled_members || []);
-            for (const memberAvatar of group.members) {
-                if (disabledMembers.has(memberAvatar)) continue;
-                const charIdx = characters.findIndex(c => c.avatar === memberAvatar);
-                if (charIdx < 0) continue;
-                _addCharacterBooks(candidates, charIdx);
-            }
-        }
-    } else if (this_chid !== undefined && this_chid !== null) {
-        _addCharacterBooks(candidates, this_chid);
-    }
+    for (const name of getCharacterBooks()) candidates.add(name);
 
     // 3. Chat-attached lorebook (native ST + CarrotKernel multi-book)
     const chatWorld = chat_metadata?.[METADATA_KEY];
@@ -181,6 +166,32 @@ export function getActiveTunnelVisionBooks() {
         if (isLorebookEnabled(bookName)) active.push(bookName);
     }
     return active;
+}
+
+/**
+ * Lorebooks attached to the current character (primary + extraBooks), whether
+ * or not TunnelVision is enabled for them.
+ * In group chats, scans ALL enabled members instead of just this_chid
+ * (this_chid rotates per character and would flip active books mid-generation).
+ * @returns {string[]}
+ */
+export function getCharacterBooks() {
+    const books = new Set();
+    if (selected_group) {
+        const group = groups?.find(g => g.id === selected_group);
+        if (group?.members) {
+            const disabledMembers = new Set(group.disabled_members || []);
+            for (const memberAvatar of group.members) {
+                if (disabledMembers.has(memberAvatar)) continue;
+                const charIdx = characters.findIndex(c => c.avatar === memberAvatar);
+                if (charIdx < 0) continue;
+                _addCharacterBooks(books, charIdx);
+            }
+        }
+    } else if (this_chid !== undefined && this_chid !== null) {
+        _addCharacterBooks(books, this_chid);
+    }
+    return [...books];
 }
 
 /**
