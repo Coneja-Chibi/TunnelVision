@@ -41,7 +41,7 @@ vi.mock('../activity-feed.js', () => ({
     logConditionalEvaluations: vi.fn(),
     setSidecarActive: vi.fn(),
 }));
-vi.mock('../index.js', () => ({ getKeywordTriggeredUids: vi.fn(() => []) }));
+vi.mock('../keyword-trigger-state.js', () => ({ getKeywordTriggeredUids: vi.fn(() => new Set()) }));
 vi.mock('../agent-utils.js', () => ({
     applyBackgroundPromptAddendum: vi.fn(s => s),
     buildLanguageDirective: vi.fn(() => ''),

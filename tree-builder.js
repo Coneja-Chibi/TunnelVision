@@ -18,10 +18,12 @@ import {
     createEmptyTree,
     createTreeNode,
     addEntryToNode,
+    removeEntryFromTree,
     saveTree,
     getAllEntryUids,
     getSettings,
     consolidateSiblingNodes,
+    isSummaryTitle,
 } from './tree-store.js';
 import { applyBackgroundPromptAddendum, trigramSimilarity } from './agent-utils.js';
 
@@ -137,6 +139,42 @@ function formatEntryForLLM(entry, detail, options = {}) {
 }
 
 /**
+ * Split a book's raw entries into buildable active entries and pre-existing
+ * summary entries (scene/act/story summaries), skipping disabled entries.
+ * Summary entries are excluded from normal tree-building so they can be
+ * pinned into a dedicated node instead — see pinSummaryEntries.
+ * @param {{entries: Object}} bookData
+ * @returns {{activeEntries: Object[], summaryEntries: Object[]}}
+ */
+export function splitEntriesForTree(bookData) {
+    const activeEntries = [];
+    const summaryEntries = [];
+    for (const key of Object.keys(bookData.entries || {})) {
+        const entry = bookData.entries[key];
+        if (entry.disable) continue;
+        if (isSummaryTitle(entry.comment)) {
+            summaryEntries.push(entry);
+        } else {
+            activeEntries.push(entry);
+        }
+    }
+    return { activeEntries, summaryEntries };
+}
+
+/**
+ * Resolve LLM tree-build settings (detail level, per-chunk character limit)
+ * with defaults applied.
+ * @param {Object} settings
+ * @returns {{detail: string, chunkLimit: number}}
+ */
+export function getTreeBuildSettings(settings) {
+    return {
+        detail: settings.llmBuildDetail || 'full',
+        chunkLimit: settings.llmChunkTokens || 30000,
+    };
+}
+
+/**
  * Build a tree automatically from existing entry metadata (keys, comments, groups).
  * @param {string} lorebookName
  * @param {Object} [options]
@@ -150,13 +188,15 @@ export async function buildTreeFromMetadata(lorebookName, options = {}) {
     }
 
     const tree = createEmptyTree(lorebookName);
-    const entries = bookData.entries;
+    // Summary entries are pinned into their own node below rather than
+    // grouped by group/key like regular lore — otherwise rebuilding a tree
+    // on a book that already has generated summaries in it would scatter
+    // them across whatever topic category their group/key happens to match.
+    const { activeEntries, summaryEntries } = splitEntriesForTree(bookData);
     const groupMap = new Map();
     const ungrouped = [];
 
-    for (const key of Object.keys(entries)) {
-        const entry = entries[key];
-        if (entry.disable) continue;
+    for (const entry of activeEntries) {
         const groupName = entry.group?.trim();
         if (groupName) {
             for (const g of groupName.split(',').map(s => s.trim()).filter(Boolean)) {
@@ -193,6 +233,8 @@ export async function buildTreeFromMetadata(lorebookName, options = {}) {
             tree.root.children.push(generalNode);
         }
     }
+
+    pinSummaryEntries(tree, summaryEntries);
 
     if (options.generateSummaries) {
         await generateSummariesForTree(tree.root, lorebookName);
@@ -259,20 +301,24 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
         throw new Error(`Lorebook "${lorebookName}" not found or has no entries.`);
     }
 
-    const activeEntries = [];
-    for (const key of Object.keys(bookData.entries)) {
-        const entry = bookData.entries[key];
-        if (entry.disable) continue;
-        activeEntries.push(entry);
-    }
+    // Summary entries (scene/act/story summaries) are pinned into a dedicated
+    // Summaries node below rather than being sent through LLM categorization
+    // alongside regular lore entries — otherwise a rebuild would scatter them
+    // across topic categories by whatever group/key they happen to carry.
+    const { activeEntries, summaryEntries } = splitEntriesForTree(bookData);
 
     if (activeEntries.length === 0) {
-        throw new Error(`Lorebook "${lorebookName}" has no active entries to index.`);
+        if (summaryEntries.length === 0) {
+            throw new Error(`Lorebook "${lorebookName}" has no active entries to index.`);
+        }
+        const tree = createEmptyTree(lorebookName);
+        pinSummaryEntries(tree, summaryEntries);
+        saveTree(lorebookName, tree);
+        return tree;
     }
 
     const settings = getSettings();
-    const detail = settings.llmBuildDetail || 'full';
-    const chunkLimit = settings.llmChunkTokens || 30000;
+    const { detail, chunkLimit } = getTreeBuildSettings(settings);
 
     // Format all entries and split into chunks with overfill
     const chunks = chunkEntries(activeEntries, detail, chunkLimit);
@@ -333,10 +379,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     }
 
     // Assign any still-unassigned UIDs to root
-    const assigned = new Set(getAllEntryUids(tree.root));
-    for (const uid of allUids) {
-        if (!assigned.has(uid)) addEntryToNode(tree.root, uid);
-    }
+    assignUnassignedEntries(tree, allUids);
 
     // Re-categorize any entries that couldn't be placed by the main chunking pass
     if (tree.root.entryUids.length > 0) {
@@ -355,10 +398,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
             if (retryResponse) {
                 tree.root.entryUids = []; // clear so mergeLLMResponse can place them
                 mergeLLMResponse(tree, retryResponse, allUids);
-                const reassigned = new Set(getAllEntryUids(tree.root));
-                for (const uid of rootUids) {
-                    if (!reassigned.has(uid)) addEntryToNode(tree.root, uid);
-                }
+                assignUnassignedEntries(tree, rootUids);
                 console.log(`[TunnelVision] Re-categorization: placed ${rootUids.length - tree.root.entryUids.length}/${rootUids.length} previously uncategorized entries.`);
             }
         }
@@ -374,6 +414,10 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     detail_(`Splitting categories with ${gran.maxEntries}+ entries (granularity: ${gran.label})`);
     await subdivideLargeNodes(tree.root, bookData, activeEntries.length);
     consolidateSiblingNodes(tree.root);
+
+    // Pin summary entries into their own node now that subdivision (which
+    // only makes sense for LLM-categorized content) is done.
+    pinSummaryEntries(tree, summaryEntries);
     saveTree(lorebookName, tree);
 
     // PageIndex pattern: generate per-node summaries (parallel with batching)
@@ -396,7 +440,7 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
  * @param {number} charLimit - Max characters per chunk
  * @returns {Object[][]} Array of entry chunks
  */
-function chunkEntries(entries, detail, charLimit) {
+export function chunkEntries(entries, detail, charLimit) {
     if (entries.length === 0) return [];
 
     const chunks = [];
@@ -427,11 +471,46 @@ function chunkEntries(entries, detail, charLimit) {
 }
 
 /**
+ * Add any UID not already present anywhere in the tree to root.
+ * @param {import('./tree-store.js').TreeIndex} tree
+ * @param {number[]} allUids
+ */
+export function assignUnassignedEntries(tree, allUids) {
+    const assigned = new Set(getAllEntryUids(tree.root));
+    for (const uid of allUids) {
+        if (!assigned.has(uid)) addEntryToNode(tree.root, uid);
+    }
+}
+
+/**
+ * Pin summary entries (scene/act/story summaries) into a dedicated
+ * "Summaries" node, creating it if it doesn't exist yet. Removes each entry
+ * from wherever else it currently lives in the tree first, so a rebuild
+ * never leaves it duplicated across nodes.
+ * @param {import('./tree-store.js').TreeIndex} tree
+ * @param {Object[]} summaryEntries
+ */
+export function pinSummaryEntries(tree, summaryEntries) {
+    if (!summaryEntries || summaryEntries.length === 0) return;
+
+    let summariesNode = tree.root.children.find(c => c.label === 'Summaries');
+    if (!summariesNode) {
+        summariesNode = createTreeNode('Summaries', 'Auto-generated scene, act, and story summaries.');
+        tree.root.children.push(summariesNode);
+    }
+
+    for (const entry of summaryEntries) {
+        removeEntryFromTree(tree.root, entry.uid);
+        addEntryToNode(summariesNode, entry.uid);
+    }
+}
+
+/**
  * Extract existing category labels from tree for continuation prompts.
  * @param {import('./tree-store.js').TreeNode} root
  * @returns {string[]}
  */
-function extractCategoryLabels(root) {
+export function extractCategoryLabels(root) {
     const labels = [];
     for (const child of (root.children || [])) {
         const count = getAllEntryUids(child).length;
@@ -457,7 +536,7 @@ function extractCategoryLabels(root) {
  * @param {string[]} existingCategories
  * @returns {string}
  */
-function buildContinuationPrompt(lorebookName, entries, existingCategories, totalEntryCount = 0) {
+export function buildContinuationPrompt(lorebookName, entries, existingCategories, totalEntryCount = 0) {
     const detail = getSettings().llmBuildDetail || 'full';
     const entryList = entries.map(e => `  - ${formatEntryForLLM(e, detail)}`).join('\n');
     const catList = existingCategories.map(c => `  - ${c}`).join('\n');

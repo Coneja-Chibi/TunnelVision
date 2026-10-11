@@ -23,7 +23,7 @@ import { getContext } from '../../../st-context.js';
 import { ToolManager } from '../../../tool-calling.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
 import { getSettings, isLorebookEnabled, setLorebookEnabled, getTree, saveTree, isNativeInjectionBook, migrateSelectedLorebook } from './tree-store.js';
-import { preflightToolRuntimeState, registerTools, getActiveTunnelVisionBooks } from './tool-registry.js';
+import { preflightToolRuntimeState, registerTools, getActiveTunnelVisionBooks, applyRecurseLimit } from './tool-registry.js';
 import { resetSearchLoopTracker, resetSelectiveRetrievalTracker } from './tools/search.js';
 import { buildNotebookPrompt, resetNotebookWriteGuard } from './tools/notebook.js';
 import { flushPendingSummaryHide } from './tools/summarize.js';
@@ -43,6 +43,7 @@ import { separateConditions, isEvaluableCondition, formatCondition, EVALUABLE_TY
 import { loadWorldInfo, saveWorldInfo, world_names } from '../../../world-info.js';
 import { findEntryByUid } from './entry-manager.js';
 import { isOocTurn, isOocUserTurn, suppressTunnelVisionWriteTools } from './turn-classification.js';
+import { getKeywordTriggeredUids } from './keyword-trigger-state.js';
 
 const EXTENSION_NAME = 'tunnelvision';
 const EXTENSION_FOLDER = `third-party/TunnelVision`;
@@ -185,7 +186,7 @@ async function init() {
             _skipTunnelVisionForOoc = false;
             _toolRecursionDepth = 0;
             _skipPreCommandGeneration = false;
-            _keywordTriggeredUids.clear();
+            getKeywordTriggeredUids().clear();
             window.TunnelVision_isRecursiveToolPass = false;
         });
     } else {
@@ -685,13 +686,6 @@ function injectConditionButton(entryEl, bookName, bookData) {
  * keywords would double-inject them into context.
  * @param {{ globalLore: Array, characterLore: Array, chatLore: Array, personaLore: Array }} data
  */
-/** UIDs of entries that were keyword-triggered this turn (when allowKeywordTriggers is on). */
-let _keywordTriggeredUids = new Set();
-
-/** Get the set of entry UIDs that were keyword-triggered this turn. */
-export function getKeywordTriggeredUids() {
-    return _keywordTriggeredUids;
-}
 
 function onWorldInfoEntriesLoaded(data) {
     const settings = getSettings();
@@ -739,14 +733,15 @@ function onWorldInfoActivatedForTracking(entryList) {
     const settings = getSettings();
     if (!settings.allowKeywordTriggers) return;
 
-    _keywordTriggeredUids.clear();
+    const keywordTriggeredUids = getKeywordTriggeredUids();
+    keywordTriggeredUids.clear();
     for (const entry of entryList) {
         if (entry.world && isLorebookEnabled(entry.world) && entry.uid !== undefined) {
-            _keywordTriggeredUids.add(entry.uid);
+            keywordTriggeredUids.add(entry.uid);
         }
     }
-    if (_keywordTriggeredUids.size > 0) {
-        console.log(`[TunnelVision] ${_keywordTriggeredUids.size} TV-managed entries also keyword-triggered this turn`);
+    if (keywordTriggeredUids.size > 0) {
+        console.log(`[TunnelVision] ${keywordTriggeredUids.size} TV-managed entries also keyword-triggered this turn`);
     }
 }
 
@@ -1225,27 +1220,6 @@ async function onMessageReceived(messageId, type) {
         _writerRunning = false;
     }
 }
-
-/**
- * Apply the user's RECURSE_LIMIT override to ToolManager.
- * Only overrides when the user has set a value different from the default (5).
- * Stores the original value so we can restore on disable.
- * @param {Object} settings
- */
-const ST_DEFAULT_RECURSE_LIMIT = 5;
-
-function applyRecurseLimit(settings) {
-    const limit = Number(settings.recurseLimit);
-    if (!isFinite(limit) || limit < 1) {
-        ToolManager.RECURSE_LIMIT = ST_DEFAULT_RECURSE_LIMIT;
-        return;
-    }
-    // Clamp to sane range: 1–50. Over 50 is almost certainly a mistake.
-    ToolManager.RECURSE_LIMIT = Math.min(Math.max(Math.round(limit), 1), 50);
-}
-
-// Exported so ui-controller can call it when the setting changes
-export { applyRecurseLimit };
 
 // Initialize
 await init();

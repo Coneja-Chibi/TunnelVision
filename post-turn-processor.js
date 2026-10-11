@@ -239,7 +239,7 @@ export async function runPostTurnProcessor(force = false) {
   if (!chat || chat.length === 0) return null;
 
   const chatId = getChatId();
-  const { book: targetBook, error } = resolveTargetBook(activeBooks[0]);
+  const { book: targetBook, error } = resolveTargetBook(activeBooks[0], { checkWrite: true });
   if (error || !targetBook) return null;
 
   _processorRunning = true;
@@ -1368,7 +1368,7 @@ export async function createTrackerForCharacter(characterName) {
   const activeBooks = getActiveTunnelVisionBooks();
   if (activeBooks.length === 0) throw new Error("No active lorebooks");
 
-  const { book: targetBook, error } = resolveTargetBook(activeBooks[0]);
+  const { book: targetBook, error } = resolveTargetBook(activeBooks[0], { checkWrite: true });
   if (error || !targetBook)
     throw new Error(error || "Could not resolve target lorebook");
 
