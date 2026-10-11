@@ -230,6 +230,23 @@ export function getAllEntryUids(node) {
 }
 
 /**
+ * Flatten the tree into a depth-first list of every node with its nesting
+ * depth. Used by the "Move to…" picker, which needs a flat indented list of
+ * destinations; collapsed nodes are included, since collapse is a view state.
+ * @param {TreeNode} node
+ * @param {number} depth
+ * @returns {{ node: TreeNode, depth: number }[]}
+ */
+export function flattenNodes(node, depth = 0) {
+    if (!node) return [];
+    const flat = [{ node, depth }];
+    for (const child of (node.children || [])) {
+        flat.push(...flattenNodes(child, depth + 1));
+    }
+    return flat;
+}
+
+/**
  * Build a text representation of the tree for the LLM tool description.
  * This is what the model sees when deciding which branch to search.
  * @param {TreeNode} node
