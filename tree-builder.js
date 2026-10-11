@@ -308,7 +308,13 @@ async function _buildTreeWithLLM(lorebookName, options = {}) {
     const { activeEntries, summaryEntries } = splitEntriesForTree(bookData);
 
     if (activeEntries.length === 0) {
-        throw new Error(`Lorebook "${lorebookName}" has no active entries to index.`);
+        if (summaryEntries.length === 0) {
+            throw new Error(`Lorebook "${lorebookName}" has no active entries to index.`);
+        }
+        const tree = createEmptyTree(lorebookName);
+        pinSummaryEntries(tree, summaryEntries);
+        saveTree(lorebookName, tree);
+        return tree;
     }
 
     const settings = getSettings();
