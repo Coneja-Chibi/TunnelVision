@@ -1736,9 +1736,17 @@ async function onOpenTreeEditor() {
     }
 
     function assignEntryToNode(uid, targetNode) {
-        removeEntryFromTree(tree.root, uid);
-        addEntryToNode(targetNode, uid);
-        saveTree(bookName, tree);
+        const currentTree = getTree(bookName);
+        const target = findNodeById(currentTree?.root, targetNode.id);
+        if (!target) {
+            toastr.warning('This category is no longer available. Reopen the move picker.', 'TunnelVision');
+            return null;
+        }
+        removeEntryFromTree(currentTree.root, uid);
+        addEntryToNode(target, uid);
+        saveTree(bookName, currentTree);
+        tree.root = currentTree.root;
+        return target;
     }
 
     /**
@@ -1764,9 +1772,10 @@ async function onOpenTreeEditor() {
                 $row.append($('<span class="tv-move-picker-here">here</span>'));
             } else {
                 $row.on('click', async () => {
-                    assignEntryToNode(uid, node);
+                    const target = assignEntryToNode(uid, node);
+                    if (!target) return;
                     await picker.complete(POPUP_RESULT.CANCELLED);
-                    selectNode(node);
+                    selectNode(target);
                     await renderUnassignedEntries(bookName, tree, bookData);
                     registerTools();
                 });
@@ -1831,8 +1840,9 @@ async function onOpenTreeEditor() {
             const raw = e.originalEvent.dataTransfer.getData('text/plain');
             if (!raw || !/^\d+$/.test(raw)) return;
             const uid = Number(raw);
-            assignEntryToNode(uid, node);
-            selectNode(node);
+            const target = assignEntryToNode(uid, node);
+            if (!target) return;
+            selectNode(target);
             renderUnassignedEntries(bookName, tree, bookData);
             registerTools();
         });

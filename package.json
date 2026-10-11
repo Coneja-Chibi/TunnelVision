@@ -6,6 +6,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "jquery": "^3.7.1",
     "jsdom": "^29.0.0",
     "vitest": "^3.0.0"
   }
