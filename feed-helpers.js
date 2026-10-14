@@ -47,7 +47,7 @@ export function createEntryFeedItem({ source, lorebook = '', uid = null, title =
         source,
         icon: 'fa-book-open',
         verb: source === 'tunnelvision' ? 'Injected' : 'Triggered',
-        color: source === 'smart-context' || source === 'tunnelvision' ? '#fdcb6e' : '#e84393',
+        color: source === 'smart-context' || source === 'tunnelvision' ? '#fdcb6e' : 'var(--tv-color-primary)',
         lorebook,
         uid,
         title,

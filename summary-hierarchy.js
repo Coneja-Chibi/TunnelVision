@@ -376,7 +376,7 @@ export async function rollupStorySummary(bookName) {
         addBackgroundEvent({
             type: 'system',
             icon: 'fa-book',
-            color: '#e84393',
+            color: 'var(--tv-color-primary)',
             title: 'Story summary updated',
             detail: `Covers ${actSummaries.length} act(s)`,
         });
@@ -401,7 +401,7 @@ export async function rollupStorySummary(bookName) {
     addBackgroundEvent({
         type: 'system',
         icon: 'fa-book',
-        color: '#e84393',
+        color: 'var(--tv-color-primary)',
         title: 'Story summary created',
         detail: `"${parsed.title}" — covers ${actSummaries.length} act(s)`,
     });

@@ -69,9 +69,9 @@ export function renderStatsBar() {
         'fa-book-open',
         triggeredEntries + tvEntries,
         `Entries (${nativeEntries} native, ${postTurnEntries} post-turn, ${worldStateEntries} world-state, ${tvEntries} TV)`,
-        '#e84393',
+        'var(--tv-color-primary)',
     );
-    addStatPair(bar, 'fa-gear', toolCount, 'Tool calls', '#f0946c');
+    addStatPair(bar, 'fa-gear', toolCount, 'Tool calls', 'var(--tv-color-secondary)');
     addStatPair(bar, 'fa-robot', bgCount, 'Agent tasks', '#6c5ce7');
 
     const lbStat = el('div', 'tv-feed-stat');
@@ -189,7 +189,7 @@ export function buildContextUsageBar() {
     wrapper.appendChild(labelRow);
 
     const SLOT_CONFIG = [
-        { key: 'mandatory', label: 'Prompt', color: '#e84393' },
+        { key: 'mandatory', label: 'Prompt', color: 'var(--tv-color-primary)' },
         { key: 'worldState', label: 'World State', color: '#00b894' },
         { key: 'smartContext', label: 'Smart Context', color: '#6c5ce7' },
         { key: 'notebook', label: 'Notebook', color: '#fdcb6e' },

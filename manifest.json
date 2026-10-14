@@ -3,10 +3,10 @@
     "loading_order": 55,
     "requires": [],
     "optional": [],
-    "js": "index.js",
+    "js": "theme-entry.js?v=theme-5",
     "generate_interceptor": "TunnelVision_generateInterceptor",
-    "css": "style.css",
+    "css": "style.css?v=theme-5",
     "author": "Coneja-Chibi",
-    "version": "0.1.0",
+    "version": "0.1.5",
     "description": "Reasoning-based lorebook retrieval using hierarchical tree indexing. Replaces keyword triggers with LLM-driven contextual search via tool calls."
 }

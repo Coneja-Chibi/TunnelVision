@@ -18,9 +18,9 @@ export const TRACKER_SUGGESTION_NAME_RE = /^"([^"]+)"/;
 
 /** Display config for each known tool name. */
 export const TOOL_DISPLAY = {
-    'TunnelVision_Search':{ icon: 'fa-magnifying-glass', verb: 'Searched', color: '#e84393' },
+    'TunnelVision_Search':{ icon: 'fa-magnifying-glass', verb: 'Searched', color: 'var(--tv-color-primary)' },
     'TunnelVision_Remember':   { icon: 'fa-brain',verb: 'Remembered', color: '#6c5ce7' },
-    'TunnelVision_Update':     { icon: 'fa-pen',             verb: 'Updated', color: '#f0946c' },
+    'TunnelVision_Update':     { icon: 'fa-pen',             verb: 'Updated', color: 'var(--tv-color-secondary)' },
     'TunnelVision_Forget':     { icon: 'fa-eraser',          verb: 'Forgot', color: '#ef4444' },
     'TunnelVision_Reorganize': { icon: 'fa-arrows-rotate',   verb: 'Reorganized', color: '#00b894' },
     'TunnelVision_Summarize':  { icon: 'fa-file-lines',      verb: 'Summarized', color: '#fdcb6e' },

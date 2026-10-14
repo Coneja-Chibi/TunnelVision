@@ -3,18 +3,44 @@
  * Design: Matches Nobunny Project family (CarrotKernel, RabbitResponseTeam)
  */
 
+:root {
+    --tv-color-primary: #e84393;
+    --tv-color-secondary: #f0946c;
+    --tv-color-primary-hover: #ec6aaa;
+    --tv-color-secondary-hover: #f4ad87;
+    --tv-color-primary-text: #ec7fa0;
+    --tv-color-filled-primary: var(--tv-color-primary);
+    --tv-color-filled-secondary: var(--tv-color-secondary);
+    --tv-color-filled-primary-hover: var(--tv-color-primary-hover);
+    --tv-color-filled-secondary-hover: var(--tv-color-secondary-hover);
+    --tv-color-on-filled: white;
+}
+
+:root[data-tv-theme="sillytavern"] {
+    --tv-color-primary: var(--SmartThemeEmColor, #e84393);
+    --tv-color-secondary: var(--SmartThemeQuoteColor, #f0946c);
+    --tv-color-primary-hover: color-mix(in srgb, var(--SmartThemeEmColor, #e84393) 82%, white);
+    --tv-color-secondary-hover: color-mix(in srgb, var(--SmartThemeQuoteColor, #f0946c) 82%, white);
+    --tv-color-primary-text: var(--SmartThemeEmColor, #ec7fa0);
+    --tv-color-filled-primary: color-mix(in srgb, var(--SmartThemeEmColor, #e84393) 24%, var(--SmartThemeBlurTintColor, #222));
+    --tv-color-filled-secondary: color-mix(in srgb, var(--SmartThemeQuoteColor, #f0946c) 24%, var(--SmartThemeBlurTintColor, #222));
+    --tv-color-filled-primary-hover: color-mix(in srgb, var(--SmartThemeEmColor, #e84393) 32%, var(--SmartThemeBlurTintColor, #222));
+    --tv-color-filled-secondary-hover: color-mix(in srgb, var(--SmartThemeQuoteColor, #f0946c) 32%, var(--SmartThemeBlurTintColor, #222));
+    --tv-color-on-filled: var(--SmartThemeBodyColor, #fff);
+}
+
 /* ===== Container ===== */
 .tv-container {
     margin: 10px 0;
     border-radius: 10px;
     overflow: hidden;
-    background: linear-gradient(135deg, rgba(232, 67, 147, 0.08) 0%, rgba(240, 148, 108, 0.06) 100%);
-    border: 1px solid rgba(232, 67, 147, 0.35);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--tv-color-primary) 8%, transparent) 0%, color-mix(in srgb, var(--tv-color-secondary) 6%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--tv-color-primary) 35%, transparent);
 }
 
 /* ===== Branded Header (collapsible) ===== */
 .tv-header {
-    background: linear-gradient(135deg, #e84393 0%, #f0946c 100%);
+    background: linear-gradient(135deg, var(--tv-color-filled-primary) 0%, var(--tv-color-filled-secondary) 100%);
     border-radius: 10px 10px 0 0;
     padding: 14px 18px;
     display: flex;
@@ -31,7 +57,7 @@
 
 .tv-header-icon {
     font-size: 22px;
-    color: white;
+    color: var(--tv-color-on-filled);
     animation: tv-float 3s ease-in-out infinite;
 }
 
@@ -47,29 +73,29 @@
 }
 
 .tv-header-title {
-    color: white;
+    color: var(--tv-color-on-filled);
     font-size: 15px;
     font-weight: 700;
     letter-spacing: 0.5px;
 }
 
 .tv-header-subtitle {
-    color: rgba(255, 255, 255, 0.8);
+    color: color-mix(in srgb, var(--tv-color-on-filled) 80%, transparent);
     font-size: 11px;
 }
 
 .tv-header-badge {
     font-size: 10px;
     padding: 2px 8px;
-    background: rgba(255, 255, 255, 0.2);
-    color: white;
+    background: color-mix(in srgb, var(--tv-color-on-filled) 20%, transparent);
+    color: var(--tv-color-on-filled);
     border-radius: 10px;
     font-weight: 500;
     letter-spacing: 0.3px;
 }
 
 .tv-header-chevron {
-    color: rgba(255, 255, 255, 0.7);
+    color: color-mix(in srgb, var(--tv-color-on-filled) 70%, transparent);
     font-size: 12px;
     transition: transform 0.3s ease;
 }
@@ -88,8 +114,8 @@
     font-size: 12px;
     opacity: 0.8;
     padding: 10px 12px;
-    background: rgba(232, 67, 147, 0.12);
-    border-left: 3px solid #e84393;
+    background: color-mix(in srgb, var(--tv-color-primary) 12%, transparent);
+    border-left: 3px solid var(--tv-color-primary);
     border-radius: 6px;
     margin-bottom: 12px;
     line-height: 1.5;
@@ -106,7 +132,27 @@
 }
 
 .tv-card:hover {
-    border-color: rgba(232, 67, 147, 0.3);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
+}
+
+.tv-appearance-menu > summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tv-appearance-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.tv-appearance-chevron {
+    font-size: 11px;
+    opacity: 0.6;
+    transition: transform 0.2s ease;
+}
+
+.tv-appearance-menu[open] .tv-appearance-chevron {
+    transform: rotate(180deg);
 }
 
 .tv-card-header {
@@ -114,14 +160,14 @@
     align-items: center;
     gap: 8px;
     padding: 10px 14px;
-    background: linear-gradient(135deg, rgba(232, 67, 147, 0.15) 0%, rgba(240, 148, 108, 0.12) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--tv-color-primary) 15%, transparent) 0%, color-mix(in srgb, var(--tv-color-secondary) 12%, transparent) 100%);
     font-weight: 600;
     font-size: 13px;
     color: var(--SmartThemeEmColor);
 }
 
 .tv-card-header i:first-child {
-    color: #e84393;
+    color: var(--tv-color-primary);
     font-size: 13px;
 }
 
@@ -141,7 +187,7 @@
 }
 
 .tv-card-header-collapsible:hover {
-    background: linear-gradient(135deg, rgba(232, 67, 147, 0.25) 0%, rgba(240, 148, 108, 0.15) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--tv-color-primary) 25%, transparent) 0%, color-mix(in srgb, var(--tv-color-secondary) 15%, transparent) 100%);
 }
 
 .tv-collapse-icon {
@@ -174,7 +220,7 @@
 
 .tv-setting-row:hover {
     background: var(--black50a, rgba(0, 0, 0, 0.2));
-    border-color: rgba(232, 67, 147, 0.2);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 20%, transparent);
 }
 
 .tv-label {
@@ -231,8 +277,8 @@
 }
 
 .tv-toggle input:checked + .tv-toggle-slider {
-    background: linear-gradient(135deg, #e84393 0%, #f0946c 100%);
-    box-shadow: 0 0 10px rgba(232, 67, 147, 0.3);
+    background: linear-gradient(135deg, var(--tv-color-primary) 0%, var(--tv-color-secondary) 100%);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
 }
 
 .tv-toggle input:checked + .tv-toggle-slider::before {
@@ -240,7 +286,7 @@
 }
 
 .tv-toggle input:focus + .tv-toggle-slider {
-    box-shadow: 0 0 0 3px rgba(232, 67, 147, 0.2);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tv-color-primary) 20%, transparent);
 }
 
 .tv-toggle-label {
@@ -262,7 +308,7 @@
 }
 
 .tv-lorebook-filter:focus-within {
-    border-color: rgba(232, 67, 147, 0.4);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 40%, transparent);
 }
 
 .tv-lorebook-filter i {
@@ -307,12 +353,12 @@
 
 .tv-lorebook-card:hover {
     background: rgba(0, 0, 0, 0.3);
-    border-color: rgba(232, 67, 147, 0.2);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 20%, transparent);
 }
 
 .tv-lorebook-card.tv-lorebook-selected {
-    background: rgba(232, 67, 147, 0.1);
-    border-color: rgba(232, 67, 147, 0.35);
+    background: color-mix(in srgb, var(--tv-color-primary) 10%, transparent);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 35%, transparent);
 }
 
 .tv-lorebook-card:not(.tv-lorebook-active) {
@@ -331,12 +377,12 @@
 }
 
 .tv-dot-on {
-    background: #e84393;
-    box-shadow: 0 0 4px rgba(232, 67, 147, 0.5);
+    background: var(--tv-color-primary);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--tv-color-primary) 50%, transparent);
 }
 
 .tv-dot-ready {
-    background: rgba(240, 148, 108, 0.5);
+    background: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent);
 }
 
 .tv-dot-off {
@@ -380,8 +426,8 @@
 .tv-badge-tv-on {
     font-size: 9px;
     padding: 1px 6px;
-    background: rgba(232, 67, 147, 0.15);
-    color: #ec7fa0;
+    background: color-mix(in srgb, var(--tv-color-primary) 15%, transparent);
+    color: var(--tv-color-primary-text);
     border-radius: 4px;
     font-weight: 600;
     display: inline-flex;
@@ -396,7 +442,7 @@
 .tv-badge-tree {
     font-size: 9px;
     padding: 1px 5px;
-    color: #f0946c;
+    color: var(--tv-color-secondary);
     opacity: 0.7;
 }
 
@@ -406,21 +452,21 @@
     padding: 8px 12px;
     background: var(--black30a, rgba(0, 0, 0, 0.15));
     color: var(--SmartThemeBodyColor);
-    border: 1px solid rgba(240, 148, 108, 0.25);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 25%, transparent);
     border-radius: 6px;
     font-size: 13px;
     transition: all 0.2s ease;
 }
 
 .tv-select:hover {
-    border-color: rgba(240, 148, 108, 0.5);
+    border-color: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent);
     background: var(--black50a, rgba(0, 0, 0, 0.25));
 }
 
 .tv-select:focus {
     outline: none;
-    border-color: #f0946c;
-    box-shadow: 0 0 0 3px rgba(240, 148, 108, 0.15);
+    border-color: var(--tv-color-secondary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
 }
 
 .tv-textarea {
@@ -428,7 +474,7 @@
     padding: 8px 12px;
     background: var(--black30a, rgba(0, 0, 0, 0.15));
     color: var(--SmartThemeBodyColor);
-    border: 1px solid rgba(240, 148, 108, 0.25);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 25%, transparent);
     border-radius: 6px;
     font-size: 13px;
     font-family: inherit;
@@ -437,14 +483,14 @@
 }
 
 .tv-textarea:hover {
-    border-color: rgba(240, 148, 108, 0.5);
+    border-color: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent);
     background: var(--black50a, rgba(0, 0, 0, 0.25));
 }
 
 .tv-textarea:focus {
     outline: none;
-    border-color: #f0946c;
-    box-shadow: 0 0 0 3px rgba(240, 148, 108, 0.15);
+    border-color: var(--tv-color-secondary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
 }
 
 /* ===== Buttons ===== */
@@ -470,15 +516,15 @@
 }
 
 .tv-btn-primary {
-    background: linear-gradient(135deg, #e84393 0%, #f0946c 100%);
-    color: white;
-    box-shadow: 0 2px 8px rgba(232, 67, 147, 0.3);
+    background: linear-gradient(135deg, var(--tv-color-filled-primary) 0%, var(--tv-color-filled-secondary) 100%);
+    color: var(--tv-color-on-filled);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
 }
 
 .tv-btn-primary:hover {
-    background: linear-gradient(135deg, #ec6aaa 0%, #f4ad87 100%);
+    background: linear-gradient(135deg, var(--tv-color-filled-primary-hover) 0%, var(--tv-color-filled-secondary-hover) 100%);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(232, 67, 147, 0.4);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--tv-color-primary) 40%, transparent);
 }
 
 .tv-btn-primary:active {
@@ -492,14 +538,14 @@
 }
 
 .tv-btn-secondary {
-    background: rgba(240, 148, 108, 0.15);
+    background: color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
     color: var(--SmartThemeBodyColor);
-    border: 1px solid rgba(240, 148, 108, 0.3);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 30%, transparent);
 }
 
 .tv-btn-secondary:hover {
-    background: rgba(240, 148, 108, 0.25);
-    border-color: rgba(240, 148, 108, 0.5);
+    background: color-mix(in srgb, var(--tv-color-secondary) 25%, transparent);
+    border-color: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent);
 }
 
 .tv-btn-secondary:disabled {
@@ -519,8 +565,8 @@
 }
 
 .tv-btn-icon:hover {
-    color: #e84393;
-    background: rgba(232, 67, 147, 0.1);
+    color: var(--tv-color-primary);
+    background: color-mix(in srgb, var(--tv-color-primary) 10%, transparent);
 }
 
 .tv-btn-danger-icon:hover {
@@ -551,7 +597,7 @@
 }
 
 .tv-status-bar i {
-    color: #f0946c;
+    color: var(--tv-color-secondary);
     font-size: 12px;
 }
 
@@ -559,8 +605,8 @@
 .tv-count-badge {
     font-size: 10px;
     padding: 1px 7px;
-    background: linear-gradient(135deg, #e84393 0%, #f0946c 100%);
-    color: white;
+    background: linear-gradient(135deg, var(--tv-color-filled-primary) 0%, var(--tv-color-filled-secondary) 100%);
+    color: var(--tv-color-on-filled);
     border-radius: 10px;
     font-weight: 600;
     min-width: 18px;
@@ -574,15 +620,15 @@
     gap: 8px;
     padding: 6px 10px;
     background: var(--black30a, rgba(0, 0, 0, 0.15));
-    border: 1px solid rgba(240, 148, 108, 0.25);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 25%, transparent);
     border-radius: 6px;
     margin-bottom: 10px;
     transition: border-color 0.2s ease;
 }
 
 .tv-search-container:focus-within {
-    border-color: #f0946c;
-    box-shadow: 0 0 0 2px rgba(240, 148, 108, 0.1);
+    border-color: var(--tv-color-secondary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--tv-color-secondary) 10%, transparent);
 }
 
 .tv-search-icon {
@@ -654,9 +700,9 @@
 
 /* ===== Drop Target ===== */
 .tv_drop_target {
-    background: rgba(240, 148, 108, 0.1) !important;
-    border-color: rgba(240, 148, 108, 0.5) !important;
-    box-shadow: inset 0 0 8px rgba(240, 148, 108, 0.1);
+    background: color-mix(in srgb, var(--tv-color-secondary) 10%, transparent) !important;
+    border-color: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent) !important;
+    box-shadow: inset 0 0 8px color-mix(in srgb, var(--tv-color-secondary) 10%, transparent);
 }
 
 /* ===== Build Progress ===== */
@@ -664,7 +710,7 @@
     margin: 10px 0;
     padding: 10px 12px;
     background: var(--black30a, rgba(0, 0, 0, 0.15));
-    border: 1px solid rgba(232, 67, 147, 0.2);
+    border: 1px solid color-mix(in srgb, var(--tv-color-primary) 20%, transparent);
     border-radius: 8px;
 }
 
@@ -689,7 +735,7 @@
 
 .tv-build-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #e84393, #f0946c);
+    background: linear-gradient(90deg, var(--tv-color-primary), var(--tv-color-secondary));
     border-radius: 3px;
     width: 0%;
     transition: width 0.4s ease;
@@ -745,8 +791,8 @@
     display: inline-block;
     width: 14px;
     height: 14px;
-    border: 2px solid rgba(232, 67, 147, 0.3);
-    border-top-color: #e84393;
+    border: 2px solid color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
+    border-top-color: var(--tv-color-primary);
     border-radius: 50%;
     animation: tv_spin 0.6s linear infinite;
 }
@@ -767,7 +813,7 @@
 
 .tv-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #e84393, #f0946c);
+    background: linear-gradient(90deg, var(--tv-color-primary), var(--tv-color-secondary));
     border-radius: 2px;
     transition: width 0.3s ease;
     animation: tv-progress-pulse 1.5s ease-in-out infinite;
@@ -787,7 +833,7 @@
 .tv-adv-section-title {
     font-size: 12px;
     font-weight: 600;
-    color: #ec7fa0;
+    color: var(--tv-color-primary-text);
     margin-bottom: 4px;
     letter-spacing: 0.3px;
 }
@@ -853,11 +899,11 @@
 }
 
 .tv-radio:hover {
-    background: rgba(232, 67, 147, 0.06);
+    background: color-mix(in srgb, var(--tv-color-primary) 6%, transparent);
 }
 
 .tv-radio input[type="radio"] {
-    accent-color: #e84393;
+    accent-color: var(--tv-color-primary);
     width: 14px;
     height: 14px;
     cursor: pointer;
@@ -886,8 +932,8 @@
 .tv-badge-recommended {
     font-size: 9px;
     padding: 1px 6px;
-    background: linear-gradient(135deg, #e84393 0%, #f0946c 100%);
-    color: white;
+    background: linear-gradient(135deg, var(--tv-color-filled-primary) 0%, var(--tv-color-filled-secondary) 100%);
+    color: var(--tv-color-on-filled);
     border-radius: 8px;
     font-weight: 600;
     text-transform: uppercase;
@@ -906,7 +952,7 @@
     padding: 5px 8px;
     background: var(--black30a, rgba(0, 0, 0, 0.15));
     color: var(--SmartThemeBodyColor);
-    border: 1px solid rgba(240, 148, 108, 0.25);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 25%, transparent);
     border-radius: 6px;
     font-size: 13px;
     text-align: center;
@@ -914,13 +960,13 @@
 }
 
 .tv-number-input:hover {
-    border-color: rgba(240, 148, 108, 0.5);
+    border-color: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent);
 }
 
 .tv-number-input:focus {
     outline: none;
-    border-color: #f0946c;
-    box-shadow: 0 0 0 2px rgba(240, 148, 108, 0.15);
+    border-color: var(--tv-color-secondary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
 }
 
 .tv-number-label {
@@ -932,20 +978,20 @@
     padding: 5px 8px;
     background: var(--black30a, rgba(0, 0, 0, 0.15));
     color: var(--SmartThemeBodyColor);
-    border: 1px solid rgba(240, 148, 108, 0.25);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 25%, transparent);
     border-radius: 6px;
     font-size: 13px;
     transition: all 0.2s ease;
 }
 
 .tv-text-input:hover {
-    border-color: rgba(240, 148, 108, 0.5);
+    border-color: color-mix(in srgb, var(--tv-color-secondary) 50%, transparent);
 }
 
 .tv-text-input:focus {
     outline: none;
-    border-color: #f0946c;
-    box-shadow: 0 0 0 2px rgba(240, 148, 108, 0.15);
+    border-color: var(--tv-color-secondary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
 }
 
 /* ===== Chat Ingest ===== */
@@ -980,7 +1026,7 @@
 }
 
 .tv-checkbox-row input[type="checkbox"] {
-    accent-color: #e84393;
+    accent-color: var(--tv-color-primary);
 }
 
 /* ===== Warning Text ===== */
@@ -1006,11 +1052,11 @@
     font-size: 11px;
     padding: 4px 8px;
     border-radius: 4px;
-    background: rgba(240, 148, 108, 0.1);
-    border: 1px solid rgba(240, 148, 108, 0.2);
+    background: color-mix(in srgb, var(--tv-color-secondary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 20%, transparent);
 }
 .tv-dedup-status i {
-    color: #f0946c;
+    color: var(--tv-color-secondary);
     font-size: 10px;
 }
 
@@ -1049,7 +1095,7 @@
     justify-content: center;
     cursor: pointer;
     z-index: 31000;
-    color: #e84393;
+    color: var(--tv-color-primary);
     font-size: 15px;
     transition: all 0.2s ease;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
@@ -1058,8 +1104,8 @@
 }
 
 .tv-float-trigger:hover {
-    border-color: rgba(232, 67, 147, 0.5);
-    box-shadow: 0 2px 14px rgba(232, 67, 147, 0.2);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 50%, transparent);
+    box-shadow: 0 2px 14px color-mix(in srgb, var(--tv-color-primary) 20%, transparent);
     transform: scale(1.08);
 }
 
@@ -1072,21 +1118,21 @@
     min-width: 18px;
     height: 18px;
     border-radius: 9px;
-    background: #e84393;
-    color: #fff;
+    background: var(--tv-color-filled-primary);
+    color: var(--tv-color-on-filled);
     font-size: 10px;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0 4px;
-    box-shadow: 0 1px 4px rgba(232, 67, 147, 0.4);
+    box-shadow: 0 1px 4px color-mix(in srgb, var(--tv-color-primary) 40%, transparent);
 }
 
 /* Pulse animation */
 .tv-float-pulse {
-    border-color: rgba(232, 67, 147, 0.6) !important;
-    box-shadow: 0 0 12px rgba(232, 67, 147, 0.3) !important;
+    border-color: color-mix(in srgb, var(--tv-color-primary) 60%, transparent) !important;
+    box-shadow: 0 0 12px color-mix(in srgb, var(--tv-color-primary) 30%, transparent) !important;
 }
 
 .tv-float-sidecar-active {
@@ -1170,7 +1216,7 @@
 }
 
 .tv-float-panel-title i {
-    color: #e84393;
+    color: var(--tv-color-primary);
     font-size: 12px;
 }
 
@@ -1197,7 +1243,7 @@
     right: 0;
     z-index: 10001;
     background: var(--SmartThemeBlurTintColor, #1a1a2e);
-    border: 1px solid rgba(240, 148, 108, 0.3);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 30%, transparent);
     border-radius: 8px;
     padding: 6px;
     min-width: 180px;
@@ -1225,7 +1271,7 @@
 }
 
 .tv-book-picker-btn:hover {
-    background: rgba(240, 148, 108, 0.15);
+    background: color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
 }
 
 /* Tabs */
@@ -1254,8 +1300,8 @@
 }
 
 .tv-float-tab.active {
-    background: rgba(232, 67, 147, 0.15);
-    color: #e84393;
+    background: color-mix(in srgb, var(--tv-color-primary) 15%, transparent);
+    color: var(--tv-color-primary);
     font-weight: 600;
 }
 
@@ -1316,7 +1362,7 @@
 }
 
 .tv-float-item-wi {
-    border-left: 2px solid rgba(232, 67, 147, 0.3);
+    border-left: 2px solid color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
 }
 
 .tv-float-item-icon {
@@ -1368,9 +1414,9 @@
     font-size: 9px;
     padding: 1px 5px;
     border-radius: 3px;
-    background: rgba(232, 67, 147, 0.1);
-    color: rgba(232, 67, 147, 0.7);
-    border: 1px solid rgba(232, 67, 147, 0.15);
+    background: color-mix(in srgb, var(--tv-color-primary) 10%, transparent);
+    color: color-mix(in srgb, var(--tv-color-primary) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tv-color-primary) 15%, transparent);
 }
 
 .tv-float-key-more {
@@ -1421,7 +1467,7 @@
 }
 
 .tv-popup-title i {
-    color: #e84393;
+    color: var(--tv-color-primary);
 }
 
 .tv-popup-btn {
@@ -1440,7 +1486,7 @@
 
 .tv-popup-btn:hover {
     background: var(--black50a, rgba(0, 0, 0, 0.25));
-    border-color: rgba(232, 67, 147, 0.3);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
 }
 
 .tv-popup-btn-danger:hover {
@@ -1584,8 +1630,8 @@
 }
 
 .tv-tree-row.active {
-    background: rgba(232, 67, 147, 0.1);
-    outline: 1px solid rgba(232, 67, 147, 0.25);
+    background: color-mix(in srgb, var(--tv-color-primary) 10%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--tv-color-primary) 25%, transparent);
 }
 
 .tv-tree-toggle {
@@ -1601,13 +1647,13 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #e84393;
+    background: var(--tv-color-primary);
     flex-shrink: 0;
 }
 
 /* Cycle dot colors by depth position */
-.tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+1) > .tv-tree-row > .tv-tree-dot { background: #e84393; }
-.tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+2) > .tv-tree-row > .tv-tree-dot { background: #f0946c; }
+.tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+1) > .tv-tree-row > .tv-tree-dot { background: var(--tv-color-primary); }
+.tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+2) > .tv-tree-row > .tv-tree-dot { background: var(--tv-color-secondary); }
 .tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+3) > .tv-tree-row > .tv-tree-dot { background: #6c5ce7; }
 .tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+4) > .tv-tree-row > .tv-tree-dot { background: #00b894; }
 .tv-tree-sidebar-scroll > .tv-tree-node:nth-child(5n+5) > .tv-tree-row > .tv-tree-dot { background: #fdcb6e; }
@@ -1636,8 +1682,8 @@
 }
 
 .tv-tree-drop-target {
-    outline: 1px dashed rgba(240, 148, 108, 0.5) !important;
-    background: rgba(240, 148, 108, 0.05) !important;
+    outline: 1px dashed color-mix(in srgb, var(--tv-color-secondary) 50%, transparent) !important;
+    background: color-mix(in srgb, var(--tv-color-secondary) 5%, transparent) !important;
 }
 
 /* Main panel */
@@ -1672,7 +1718,7 @@
 }
 
 .tv-bc-crumb:hover {
-    color: #e84393;
+    color: var(--tv-color-primary);
 }
 
 .tv-bc-sep {
@@ -1706,7 +1752,7 @@
 
 .tv-main-title:hover,
 .tv-main-title:focus {
-    border-bottom-color: rgba(232, 67, 147, 0.3);
+    border-bottom-color: color-mix(in srgb, var(--tv-color-primary) 30%, transparent);
 }
 
 .tv-main-title-static {
@@ -1790,13 +1836,13 @@
 }
 
 .tv-entry-row:hover {
-    border-color: rgba(232, 67, 147, 0.25);
-    background: rgba(232, 67, 147, 0.04);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 25%, transparent);
+    background: color-mix(in srgb, var(--tv-color-primary) 4%, transparent);
 }
 
 .tv-entry-row.expanded {
-    border-color: rgba(232, 67, 147, 0.4);
-    background: rgba(232, 67, 147, 0.08);
+    border-color: color-mix(in srgb, var(--tv-color-primary) 40%, transparent);
+    background: color-mix(in srgb, var(--tv-color-primary) 8%, transparent);
 }
 
 .tv-entry-row.dragging {
@@ -1913,8 +1959,8 @@
     margin: 0 0 6px 0;
     padding: 12px 14px;
     border-radius: 0 0 8px 8px;
-    background: rgba(232, 67, 147, 0.04);
-    border: 1px solid rgba(232, 67, 147, 0.15);
+    background: color-mix(in srgb, var(--tv-color-primary) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tv-color-primary) 15%, transparent);
     border-top: none;
     display: flex;
     flex-direction: column;
@@ -1959,9 +2005,9 @@
     font-size: 10px;
     padding: 2px 6px;
     border-radius: 4px;
-    background: rgba(232, 67, 147, 0.1);
-    border: 1px solid rgba(232, 67, 147, 0.2);
-    color: #ec7fa0;
+    background: color-mix(in srgb, var(--tv-color-primary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tv-color-primary) 20%, transparent);
+    color: var(--tv-color-primary-text);
 }
 
 /* ===== WI Editor: Design B — Inline Conditions Under Keywords ===== */
@@ -2442,13 +2488,13 @@
 }
 
 .tv-entry-tracker:hover {
-    color: #e84393;
-    background: rgba(232, 67, 147, 0.1);
+    color: var(--tv-color-primary);
+    background: color-mix(in srgb, var(--tv-color-primary) 10%, transparent);
 }
 
 .tv-entry-tracker.is-on {
     opacity: 0.8;
-    color: #e84393;
+    color: var(--tv-color-primary);
 }
 
 .tv-entry-row:hover .tv-entry-tracker {
@@ -2491,7 +2537,7 @@
 
 /* ===== Feed Entry Items (TunnelVision retrieved entries) ===== */
 .tv-float-item-entry-tv {
-    border-left: 2px solid rgba(240, 148, 108, 0.4);
+    border-left: 2px solid color-mix(in srgb, var(--tv-color-secondary) 40%, transparent);
 }
 
 /* Constant (always-on) entries: grayed out, pushed to bottom */
@@ -2507,7 +2553,7 @@
 /* In-progress tool call: pulsing glow */
 .tv-float-item-active {
     animation: tv-active-pulse 1.2s ease-in-out infinite;
-    border-left: 2px solid rgba(232, 67, 147, 0.8);
+    border-left: 2px solid color-mix(in srgb, var(--tv-color-primary) 80%, transparent);
 }
 .tv-float-item-active .tv-float-item-verb {
     font-style: italic;
@@ -2575,9 +2621,9 @@
     font-size: 9px;
     padding: 1px 5px;
     border-radius: 3px;
-    background: rgba(240, 148, 108, 0.1);
-    color: rgba(240, 148, 108, 0.8);
-    border: 1px solid rgba(240, 148, 108, 0.15);
+    background: color-mix(in srgb, var(--tv-color-secondary) 10%, transparent);
+    color: color-mix(in srgb, var(--tv-color-secondary) 80%, transparent);
+    border: 1px solid color-mix(in srgb, var(--tv-color-secondary) 15%, transparent);
 }
 
 /* ===== Hidden Tool Call Messages ===== */

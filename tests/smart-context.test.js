@@ -745,7 +745,7 @@ describe('preWarmSmartContext', () => {
 
         expect(addBackgroundEvent).toHaveBeenCalledWith(expect.objectContaining({
             icon: 'fa-brain',
-            color: '#e84393',
+            color: 'var(--tv-color-primary)',
             preWarmSource: 'fact-driven',
         }));
 

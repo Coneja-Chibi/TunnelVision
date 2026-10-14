@@ -288,6 +288,7 @@ export function getEntriesForNodes(root, nodeIds) {
 /** Default settings values. Adding a new setting = add one line here. */
 export const SETTING_DEFAULTS = {
     globalEnabled: true,
+    colorTheme: 'brand',
     trees: {},
     enabledLorebooks: {},
     selectedLorebook: null, // DEPRECATED: migration source only; selection now lives in chat_metadata

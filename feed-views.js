@@ -1153,7 +1153,7 @@ async function renderHealthView() {
             metaLabel.textContent = `Metadata: ${(totalMeta / 1024).toFixed(1)} KB total`;
             metaRow.appendChild(metaLabel);
 
-            const metaColors = ['#e84393', '#6c5ce7', '#00b894', '#fdcb6e', '#0984e3', '#e17055', '#a29bfe'];
+            const metaColors = ['var(--tv-color-primary)', '#6c5ce7', '#00b894', '#fdcb6e', '#0984e3', '#e17055', '#a29bfe'];
 
             const metaBar = el('div', 'tv-budget-bar');
             metaBar.style.marginTop = '4px';
@@ -1253,7 +1253,7 @@ async function renderHealthView() {
             issues.push({
                 title: `${mergedReport.duplicateCandidates.length} Duplicate Candidates`,
                 icon: 'fa-clone',
-                color: '#e84393',
+                color: 'var(--tv-color-primary)',
                 desc: 'Entries with high content similarity',
                 items: mergedReport.duplicateCandidates.slice(0, 10).map(d => ({
                     uid: d.uidA,

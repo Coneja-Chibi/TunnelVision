@@ -28,6 +28,7 @@ import { resetSearchLoopTracker, resetSelectiveRetrievalTracker } from './tools/
 import { buildNotebookPrompt, resetNotebookWriteGuard } from './tools/notebook.js';
 import { flushPendingSummaryHide } from './tools/summarize.js';
 import { bindUIEvents, refreshUI } from './ui-controller.js';
+import { applyTheme, bindThemeSelect } from './theme.js?v=theme-2';
 import { initActivityFeed } from './activity-feed.js';
 import { initCommands } from './commands.js';
 import { initAutoSummary } from './auto-summary.js';
@@ -81,8 +82,9 @@ globalThis.TunnelVision_generateInterceptor = function (_chat, _contextSize, abo
 };
 
 async function init() {
-    // Ensure settings exist
-    getSettings();
+    // Apply persisted theme before rendering to avoid a branded-color flash.
+    const initialSettings = getSettings();
+    applyTheme(initialSettings.colorTheme);
 
     // Render settings panel
     const settingsHtml = $(await renderExtensionTemplateAsync(EXTENSION_FOLDER, 'settings'));
@@ -93,6 +95,15 @@ async function init() {
         console.error('[TunnelVision] Could not find extensions_settings2 container');
         return;
     }
+
+    // Keep this binding in the cache-busted entry module. SillyTavern serves
+    // extension modules with a four-hour browser cache, so an updated template
+    // can otherwise appear while an older ui-controller is still cached.
+    bindThemeSelect(
+        document.getElementById('tv_color_theme'),
+        getSettings,
+        saveSettingsDebounced,
+    );
 
     // Bind UI events
     bindUIEvents();

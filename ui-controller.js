@@ -5,6 +5,7 @@
 
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getContext } from '../../../st-context.js';
+import { applyTheme } from './theme.js';
 import { world_names, loadWorldInfo, saveWorldInfo } from '../../../world-info.js';
 import { getAutoSummaryCount, resetAutoSummaryCount } from './auto-summary.js';
 import { getActiveTunnelVisionBooks } from './tool-registry.js';
@@ -316,6 +317,13 @@ export function bindUIEvents() {
 export function refreshUI() {
     const settings = getSettings();
     const globalEnabled = settings.globalEnabled !== false;
+    const appliedTheme = applyTheme(settings.colorTheme, document.documentElement, settings.colorThemePreset);
+    settings.colorTheme = appliedTheme;
+    const presetName = settings.colorThemePreset?.name;
+    const themeSelection = appliedTheme === 'sillytavern' && typeof presetName === 'string' && presetName.trim()
+        ? `preset:${encodeURIComponent(presetName)}`
+        : appliedTheme;
+    $('#tv_color_theme').val(themeSelection);
     syncSelectedLorebook();
 
     // Trigger active editor refresh if open
@@ -2703,7 +2711,7 @@ async function renderTreeEditor(bookName, tree) {
         });
     }
     categories.push(...(tree.root.children || []));
-    const colors = ['#e84393', '#f0946c', '#6c5ce7', '#00b894', '#fdcb6e'];
+    const colors = ['var(--tv-color-primary)', 'var(--tv-color-secondary)', '#6c5ce7', '#00b894', '#fdcb6e'];
     for (let i = 0; i < categories.length; i++) {
         const cat = categories[i];
         const count = getAllEntryUids(cat).length;
