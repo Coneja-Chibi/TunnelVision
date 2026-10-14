@@ -765,6 +765,7 @@ function onLorebookToggle() {
     setLorebookEnabled(currentLorebook, $(this).prop('checked'));
     registerTools();
     populateLorebookDropdown(); // refresh badges
+    updateIngestUI(); // ingest is shown only for TV-enabled books
 }
 
 function onBookDescriptionChange() {
